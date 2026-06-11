@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"text/tabwriter"
 
 	"github.com/mgilbir/coji/internal/core"
 	"github.com/spf13/cobra"
@@ -17,7 +18,78 @@ func newPageCmd() *cobra.Command {
 	cmd.AddCommand(newPageGetCmd())
 	cmd.AddCommand(newPageCreateCmd())
 	cmd.AddCommand(newPageEditCmd())
+	cmd.AddCommand(newPageChildrenCmd())
 	return cmd
+}
+
+func newPageChildrenCmd() *cobra.Command {
+	var recursive, folder bool
+
+	cmd := &cobra.Command{
+		Use:   "children <id>",
+		Short: "List the children of a page (or folder)",
+		Long: `List the direct children of a page in the content tree, showing each
+child's type and ID. Use --recursive for the full subtree, and --folder when
+the ID is a folder rather than a page.
+
+The IDs shown are what you pass to ` + "`page create --parent`" + ` to nest a new
+page; --parent accepts a page or a folder ID.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, err := newService(cmd)
+			if err != nil {
+				return err
+			}
+			if recursive {
+				root, err := svc.Tree(cmd.Context(), args[0], folder)
+				if err != nil {
+					return err
+				}
+				printTree(root)
+				return nil
+			}
+			children, err := svc.Children(cmd.Context(), args[0], folder)
+			if err != nil {
+				return err
+			}
+			if len(children) == 0 {
+				fmt.Println("No children.")
+				return nil
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+			fmt.Fprintln(w, "TYPE\tID\tTITLE")
+			for _, ch := range children {
+				fmt.Fprintf(w, "%s\t%s\t%s\n", ch.Type, ch.ID, ch.Title)
+			}
+			return w.Flush()
+		},
+	}
+	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "show the full subtree")
+	cmd.Flags().BoolVar(&folder, "folder", false, "treat the ID as a folder rather than a page")
+	return cmd
+}
+
+// printTree renders a content tree with box-drawing connectors. Each line shows
+// the title followed by its type and ID, so IDs are available for --parent.
+func printTree(root *core.TreeNode) {
+	label := root.Title
+	if label == "" {
+		label = "(root)"
+	}
+	fmt.Printf("%s  [%s %s]\n", label, root.Type, root.ID)
+	printChildren(root.Children, "")
+}
+
+func printChildren(nodes []*core.TreeNode, prefix string) {
+	for i, n := range nodes {
+		last := i == len(nodes)-1
+		branch, childPrefix := "├── ", prefix+"│   "
+		if last {
+			branch, childPrefix = "└── ", prefix+"    "
+		}
+		fmt.Printf("%s%s%s  [%s %s]\n", prefix, branch, n.Title, n.Type, n.ID)
+		printChildren(n.Children, childPrefix)
+	}
 }
 
 func newPageGetCmd() *cobra.Command {

@@ -98,6 +98,34 @@ cat notes.md | coji page edit 123456
 `--format` accepts `markdown` (default), `storage`, or `adf`. With `storage` or
 `adf`, the body is passed through verbatim with no conversion.
 
+### Browsing & nesting
+
+To find where to put a page, browse the content tree:
+
+```sh
+# List spaces (KEY for --space, HOMEPAGE is a page ID you can use as a tree root)
+coji space list
+coji space list --key ENG
+
+# Direct children of a page (type + ID for each)
+coji page children 123456
+
+# Full subtree, drawn as a tree (descends into folders too)
+coji page children 123456 --recursive
+
+# If the ID is a folder rather than a page
+coji page children 789012 --folder
+```
+
+Each entry shows its **type** and **ID**. To nest a new page, pass that ID as
+`--parent` — it accepts a **page or a folder** ID:
+
+```sh
+coji page create --space ENG --title "Child page" --parent 123456 --input notes.md
+```
+
+Omitting `--parent` puts the page under the space homepage.
+
 ## Design
 
 `coji` separates concerns so a future TUI can reuse the same logic:

@@ -104,6 +104,65 @@ func TestUpdatePageVersion(t *testing.T) {
 	}
 }
 
+func TestListSpacesPaginates(t *testing.T) {
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cursor := r.URL.Query().Get("cursor")
+		cursors = append(cursors, cursor)
+		switch cursor {
+		case "":
+			io.WriteString(w, `{"results":[{"id":"1","key":"A"}],"_links":{"next":"/wiki/api/v2/spaces?limit=250&cursor=NEXT"}}`)
+		case "NEXT":
+			io.WriteString(w, `{"results":[{"id":"2","key":"B"}],"_links":{}}`)
+		default:
+			t.Errorf("unexpected cursor %q", cursor)
+		}
+	}))
+	defer srv.Close()
+
+	spaces, err := newTestClient(srv).ListSpaces(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spaces) != 2 || spaces[0].Key != "A" || spaces[1].Key != "B" {
+		t.Errorf("spaces = %+v, want A then B", spaces)
+	}
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "NEXT" {
+		t.Errorf("cursors = %v, want [\"\" \"NEXT\"]", cursors)
+	}
+}
+
+func TestDirectChildrenUsesFolderPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/folders/42/direct-children" {
+			t.Errorf("path = %q, want folder path", r.URL.Path)
+		}
+		io.WriteString(w, `{"results":[{"id":"9","type":"page","title":"Kid"}],"_links":{}}`)
+	}))
+	defer srv.Close()
+
+	kids, err := newTestClient(srv).DirectChildren(context.Background(), TypeFolder, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kids) != 1 || kids[0].Type != TypePage || kids[0].ID != "9" {
+		t.Errorf("children = %+v", kids)
+	}
+}
+
+func TestCursorFromNext(t *testing.T) {
+	tests := map[string]string{
+		"":                                 "",
+		"/wiki/api/v2/pages?cursor=abc123": "abc123",
+		"/wiki/api/v2/pages?limit=25":      "",
+	}
+	for in, want := range tests {
+		if got := cursorFromNext(in); got != want {
+			t.Errorf("cursorFromNext(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

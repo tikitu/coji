@@ -80,10 +80,33 @@ type Page struct {
 	Body     *Bodies  `json:"body,omitempty"`
 }
 
-// Space is the subset of space fields coji needs, primarily to resolve a
-// human-friendly space key to the numeric spaceId required when creating pages.
+// Space is the subset of space fields coji needs: resolving a human-friendly
+// key to the numeric spaceId, and rooting a content tree at the homepage.
 type Space struct {
-	ID   string `json:"id"`
-	Key  string `json:"key"`
-	Name string `json:"name"`
+	ID         string `json:"id"`
+	Key        string `json:"key"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	HomepageID string `json:"homepageId"`
+}
+
+// ContentType identifies a node in the content tree.
+type ContentType string
+
+const (
+	TypePage       ContentType = "page"
+	TypeFolder     ContentType = "folder"
+	TypeWhiteboard ContentType = "whiteboard"
+	TypeDatabase   ContentType = "database"
+	TypeEmbed      ContentType = "embed"
+)
+
+// Child is one entry in a content tree (a page, folder, whiteboard, etc.), as
+// returned by the direct-children endpoints.
+type Child struct {
+	ID            string      `json:"id"`
+	Title         string      `json:"title"`
+	Type          ContentType `json:"type"`
+	SpaceID       string      `json:"spaceId"`
+	ChildPosition *int        `json:"childPosition"`
 }

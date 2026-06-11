@@ -216,6 +216,94 @@ func (c *Client) UpdatePage(ctx context.Context, in UpdatePageInput) (*Page, err
 	return &p, nil
 }
 
+// listAll fetches every page of a cursor-paginated v2 collection at path,
+// invoking accum with each page's raw "results" array. It follows the
+// _links.next cursor until exhausted.
+func (c *Client) listAll(ctx context.Context, path string, baseQuery url.Values, accum func(json.RawMessage) error) error {
+	cursor := ""
+	for {
+		q := url.Values{}
+		for k, v := range baseQuery {
+			q[k] = v
+		}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		var resp struct {
+			Results json.RawMessage `json:"results"`
+			Links   struct {
+				Next string `json:"next"`
+			} `json:"_links"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, q, nil, &resp); err != nil {
+			return err
+		}
+		if err := accum(resp.Results); err != nil {
+			return err
+		}
+		cursor = cursorFromNext(resp.Links.Next)
+		if cursor == "" {
+			return nil
+		}
+	}
+}
+
+// cursorFromNext extracts the cursor query parameter from a _links.next URL
+// (which is site-relative, so we only trust its query string).
+func cursorFromNext(next string) string {
+	if next == "" {
+		return ""
+	}
+	u, err := url.Parse(next)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("cursor")
+}
+
+// ListSpaces lists spaces, optionally filtered to a single key.
+func (c *Client) ListSpaces(ctx context.Context, key string) ([]Space, error) {
+	q := url.Values{}
+	q.Set("limit", "250")
+	if key != "" {
+		q.Set("keys", key)
+	}
+	var all []Space
+	err := c.listAll(ctx, "/spaces", q, func(raw json.RawMessage) error {
+		var page []Space
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return err
+		}
+		all = append(all, page...)
+		return nil
+	})
+	return all, err
+}
+
+// DirectChildren lists the direct children of a page or folder in the content
+// tree. parentType selects the endpoint ("folder" uses /folders, anything else
+// uses /pages); the returned children carry their own type for further descent.
+func (c *Client) DirectChildren(ctx context.Context, parentType ContentType, id string) ([]Child, error) {
+	collection := "pages"
+	if parentType == TypeFolder {
+		collection = "folders"
+	}
+	path := "/" + collection + "/" + url.PathEscape(id) + "/direct-children"
+
+	q := url.Values{}
+	q.Set("limit", "250")
+	var all []Child
+	err := c.listAll(ctx, path, q, func(raw json.RawMessage) error {
+		var page []Child
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return err
+		}
+		all = append(all, page...)
+		return nil
+	})
+	return all, err
+}
+
 // Ping makes a cheap authenticated request (listing one space) to verify that
 // credentials work. It returns nil on success and an *APIError (e.g. 401) when
 // auth fails.
