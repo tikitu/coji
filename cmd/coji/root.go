@@ -20,6 +20,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newPageCmd())
 	root.AddCommand(newSpaceCmd())
+	root.AddCommand(newBrowseCmd())
 
 	return root
 }

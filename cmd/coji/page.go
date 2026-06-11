@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/charmbracelet/lipgloss/tree"
 	"github.com/mgilbir/coji/internal/core"
 	"github.com/spf13/cobra"
 )
@@ -69,27 +70,28 @@ page; --parent accepts a page or a folder ID.`,
 	return cmd
 }
 
-// printTree renders a content tree with box-drawing connectors. Each line shows
-// the title followed by its type and ID, so IDs are available for --parent.
+// printTree renders a content tree using lipgloss's tree component. Each node
+// shows its title followed by type and ID, so IDs are available for --parent.
 func printTree(root *core.TreeNode) {
-	label := root.Title
-	if label == "" {
-		label = "(root)"
-	}
-	fmt.Printf("%s  [%s %s]\n", label, root.Type, root.ID)
-	printChildren(root.Children, "")
+	fmt.Println(buildTree(root))
 }
 
-func printChildren(nodes []*core.TreeNode, prefix string) {
-	for i, n := range nodes {
-		last := i == len(nodes)-1
-		branch, childPrefix := "├── ", prefix+"│   "
-		if last {
-			branch, childPrefix = "└── ", prefix+"    "
-		}
-		fmt.Printf("%s%s%s  [%s %s]\n", prefix, branch, n.Title, n.Type, n.ID)
-		printChildren(n.Children, childPrefix)
+// buildTree converts a core.TreeNode into a lipgloss tree (root + nested
+// subtrees), labelling every node uniformly.
+func buildTree(n *core.TreeNode) *tree.Tree {
+	t := tree.Root(nodeLabel(n))
+	for _, c := range n.Children {
+		t.Child(buildTree(c))
 	}
+	return t
+}
+
+func nodeLabel(n *core.TreeNode) string {
+	title := n.Title
+	if title == "" {
+		title = "(root)"
+	}
+	return fmt.Sprintf("%s  [%s %s]", title, n.Type, n.ID)
 }
 
 func newPageGetCmd() *cobra.Command {
