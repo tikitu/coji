@@ -38,6 +38,7 @@ type model struct {
 	focus    focus
 	viewport viewport.Model
 	pageID   string // id whose body is in the viewport
+	pageBody string // raw markdown of the page being viewed
 
 	width, height int
 	status        string
@@ -69,10 +70,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.viewport = viewport.New(msg.Width, msg.Height-2)
 		if m.focus == focusPage {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - 2
+			m.refreshViewport() // re-wrap markdown to the new width
+		} else {
+			m.viewport = viewport.New(msg.Width, msg.Height-2)
 		}
 		return m, nil
 
@@ -95,8 +96,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.focus = focusPage
 		m.pageID = msg.id
-		m.viewport = viewport.New(m.width, m.height-2)
-		m.viewport.SetContent(msg.body)
+		m.pageBody = msg.body
+		m.refreshViewport()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -201,6 +202,20 @@ func (m model) updatePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
+}
+
+// refreshViewport sizes the viewport to the current window and fills it with
+// the page body rendered (and word-wrapped) by glamour.
+func (m *model) refreshViewport() {
+	w, h := m.width, m.height-2
+	if w < 1 {
+		w = 80
+	}
+	if h < 1 {
+		h = 1
+	}
+	m.viewport = viewport.New(w, h)
+	m.viewport.SetContent(renderMarkdown(m.pageBody, w))
 }
 
 func (m model) current() *node {
