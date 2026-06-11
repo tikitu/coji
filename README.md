@@ -136,3 +136,17 @@ Omitting `--parent` puts the page under the space homepage.
 - `internal/markdown` — Markdown ⇆ storage conversion (goldmark + `x/net/html`).
 - `internal/core` — the use-case layer (get/create/edit) with no UI concerns.
 - `cmd/coji` — the cobra CLI, a thin shell over `internal/core`.
+
+### Generated types
+
+`internal/confluence/gen` holds Go types generated from the OpenAPI spec in
+`spec/` (models only — the HTTP client is hand-written). As the tool grows to
+cover more endpoints, build them with these ready-made types. Regenerate after
+updating the spec:
+
+```sh
+go generate ./internal/confluence/...
+```
+
+The generator (`oapi-codegen`) is pinned as a tool dependency in `go.mod`, so no
+separate install is needed.
