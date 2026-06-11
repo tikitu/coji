@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -15,8 +16,9 @@ import (
 type focus int
 
 const (
-	focusTree focus = iota // navigating the content tree
-	focusPage              // reading a page's markdown
+	focusTree     focus = iota // navigating the content tree
+	focusPage                  // reading a page's markdown
+	focusNewTitle              // entering a title for a new child page
 )
 
 var (
@@ -43,6 +45,18 @@ type model struct {
 	width, height int
 	status        string
 	err           error
+
+	// External-editor session state.
+	editMode editMode
+	editID   string // page being edited (existing)
+	editPath string // temp file backing the editor
+	editOrig string // original content, to detect "no changes"
+
+	// Pending new-child-page state.
+	titleInput  textinput.Model
+	newParent   *node
+	newSpaceID  string
+	newParentID string // parent id for the new page ("" = under homepage)
 
 	// selectedID is the last node the user marked (with "y") and is printed on
 	// exit so it can feed `page create --parent`.
@@ -100,11 +114,81 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
-	case tea.KeyMsg:
-		if m.focus == focusPage {
-			return m.updatePage(msg)
+	case editLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
 		}
-		return m.updateTree(msg)
+		path, err := writeTempMarkdown(msg.body)
+		if err != nil {
+			m.err = err
+			return m, nil
+		}
+		m.editMode = editExisting
+		m.editID = msg.id
+		m.editOrig = msg.body
+		m.editPath = path
+		m.status = "editing in $EDITOR…"
+		return m, runEditor(path)
+
+	case parentInfoMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.focus = focusTree
+			return m, nil
+		}
+		m.newSpaceID = msg.spaceID
+		m.newParentID = msg.parentID
+		path, err := writeTempMarkdown("")
+		if err != nil {
+			m.err = err
+			return m, nil
+		}
+		m.editMode = editNew
+		m.editPath = path
+		m.focus = focusTree
+		m.status = "composing new page in $EDITOR…"
+		return m, runEditor(path)
+
+	case editorClosedMsg:
+		return m.handleEditorClosed(msg)
+
+	case savedMsg:
+		m.editMode = editNone
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.status = fmt.Sprintf("saved %s (v%d)", msg.id, msg.version)
+		if m.focus == focusPage && m.pageID == msg.id {
+			m.pageBody = msg.body
+			m.refreshViewport()
+		}
+		return m, nil
+
+	case createdMsg:
+		m.editMode = editNone
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.status = fmt.Sprintf("created %q (%s)", msg.title, msg.id)
+		// Refresh the parent's children so the new page appears.
+		if msg.parent != nil {
+			msg.parent.loaded = false
+			return m, loadChildren(m.ctx, m.svc, msg.parent)
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		switch m.focus {
+		case focusPage:
+			return m.updatePage(msg)
+		case focusNewTitle:
+			return m.updateNewTitle(msg)
+		default:
+			return m.updateTree(msg)
+		}
 	}
 	return m, nil
 }
@@ -134,6 +218,15 @@ func (m model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := m.current(); n != nil && n.isPage() {
 			m.status = "loading page…"
 			return m, loadPage(m.ctx, m.svc, n.id)
+		}
+	case "e":
+		if n := m.current(); n != nil && n.isPage() {
+			m.status = "loading page for edit…"
+			return m, fetchForEdit(m.ctx, m.svc, n.id)
+		}
+	case "n":
+		if n := m.current(); n != nil && n.container() {
+			return m.beginNewPage(n), nil
 		}
 	case "y":
 		if n := m.current(); n != nil {
@@ -198,10 +291,85 @@ func (m model) updatePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "e":
+		m.status = "loading page for edit…"
+		return m, fetchForEdit(m.ctx, m.svc, m.pageID)
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
+}
+
+// beginNewPage opens the title prompt for a new child under n.
+func (m model) beginNewPage(n *node) model {
+	ti := textinput.New()
+	ti.Placeholder = "New page title"
+	ti.Focus()
+	ti.CharLimit = 255
+	m.titleInput = ti
+	m.newParent = n
+	m.focus = focusNewTitle
+	m.err = nil
+	m.status = ""
+	return m
+}
+
+// updateNewTitle handles the title-entry prompt for a new child page. On Enter
+// it resolves the parent's space/parent ids and opens the editor for the body.
+func (m model) updateNewTitle(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.focus = focusTree
+		m.status = "new page cancelled"
+		return m, nil
+	case "enter":
+		title := strings.TrimSpace(m.titleInput.Value())
+		if title == "" {
+			m.status = "title cannot be empty"
+			return m, nil
+		}
+		m.status = "resolving location…"
+		return m, resolveParent(m.ctx, m.svc, m.newParent)
+	}
+	var cmd tea.Cmd
+	m.titleInput, cmd = m.titleInput.Update(msg)
+	return m, cmd
+}
+
+// handleEditorClosed processes the result of an external-editor session: save
+// an existing page, or create the composed new child page.
+func (m model) handleEditorClosed(msg editorClosedMsg) (tea.Model, tea.Cmd) {
+	mode := m.editMode
+	path := m.editPath
+	m.editPath = ""
+	if msg.err != nil {
+		m.editMode = editNone
+		m.err = fmt.Errorf("editor: %w", msg.err)
+		return m, nil
+	}
+	content, err := readAndRemove(path)
+	if err != nil {
+		m.editMode = editNone
+		m.err = err
+		return m, nil
+	}
+
+	switch mode {
+	case editExisting:
+		if content == m.editOrig {
+			m.editMode = editNone
+			m.status = "no changes"
+			return m, nil
+		}
+		m.status = "saving…"
+		return m, saveEdit(m.ctx, m.svc, m.editID, content)
+	case editNew:
+		title := strings.TrimSpace(m.titleInput.Value())
+		m.status = "creating…"
+		return m, createChild(m.ctx, m.svc, m.newParent, m.newSpaceID, m.newParentID, title, content)
+	}
+	m.editMode = editNone
+	return m, nil
 }
 
 // refreshViewport sizes the viewport to the current window and fills it with
@@ -226,10 +394,25 @@ func (m model) current() *node {
 }
 
 func (m model) View() string {
-	if m.focus == focusPage {
+	switch m.focus {
+	case focusPage:
 		return m.pageView()
+	case focusNewTitle:
+		return m.newTitleView()
+	default:
+		return m.treeView()
 	}
-	return m.treeView()
+}
+
+func (m model) newTitleView() string {
+	parent := "(space root)"
+	if m.newParent != nil {
+		parent = fmt.Sprintf("%s [%s]", m.newParent.title, m.newParent.kind)
+	}
+	return titleStyle.Render("New child page") + "\n\n" +
+		dimStyle.Render("under: "+parent) + "\n\n" +
+		m.titleInput.View() + "\n\n" +
+		dimStyle.Render("enter to compose body in $EDITOR · esc to cancel")
 }
 
 func (m model) treeView() string {
@@ -266,7 +449,7 @@ func (m model) renderRow(n *node) string {
 
 func (m model) pageView() string {
 	header := titleStyle.Render("page " + m.pageID)
-	help := dimStyle.Render("↑/↓ scroll · q/esc back")
+	help := dimStyle.Render("↑/↓ scroll · e edit · q/esc back")
 	return header + "\n" + m.viewport.View() + "\n" + help
 }
 
@@ -274,8 +457,9 @@ func (m model) footer() string {
 	if m.err != nil {
 		return errStyle.Render("error: " + m.err.Error())
 	}
+	help := "↑/↓ move · enter expand · v view · e edit · n new child · y select id · q quit"
 	if m.status != "" {
-		return dimStyle.Render(m.status + "  ·  ↑/↓ move · enter expand · v view · y select id · q quit")
+		return dimStyle.Render(m.status + "  ·  " + help)
 	}
-	return dimStyle.Render("↑/↓ move · enter expand/collapse · v view page · y select id · q quit")
+	return dimStyle.Render(help)
 }

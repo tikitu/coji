@@ -126,6 +126,30 @@ coji page create --space ENG --title "Child page" --parent 123456 --input notes.
 
 Omitting `--parent` puts the page under the space homepage.
 
+### Interactive browser
+
+`coji browse` opens an interactive content-tree browser:
+
+```sh
+coji browse            # start from your spaces
+coji browse ENG        # start in a space
+coji browse 123456     # root the tree at a page
+```
+
+Keys:
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓` | move |
+| `enter` | expand/collapse (loads children lazily) |
+| `v` | view the page (rendered markdown, scrollable) |
+| `e` | edit the page in `$EDITOR`, saved back with a version bump |
+| `n` | create a child page under the selected node (prompts for a title, then opens `$EDITOR`) |
+| `y` | select a node's ID (printed on exit — handy for `--parent`) |
+| `q` | quit |
+
+Editing uses `$VISUAL`, then `$EDITOR`, falling back to `vi`.
+
 ## Design
 
 `coji` separates concerns so a future TUI can reuse the same logic:

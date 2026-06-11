@@ -36,12 +36,13 @@ func loadChildren(ctx context.Context, svc *core.Service, n *node) tea.Cmd {
 		nodes := make([]*node, 0, len(kids))
 		for _, ch := range kids {
 			nodes = append(nodes, &node{
-				id:     ch.ID,
-				loadID: ch.ID,
-				title:  ch.Title,
-				kind:   string(ch.Type),
-				depth:  n.depth + 1,
-				parent: n,
+				id:      ch.ID,
+				loadID:  ch.ID,
+				title:   ch.Title,
+				kind:    string(ch.Type),
+				spaceID: ch.SpaceID,
+				depth:   n.depth + 1,
+				parent:  n,
 			})
 		}
 		return childrenLoadedMsg{parent: n, children: nodes}
@@ -67,10 +68,11 @@ func spaceNode(s confluence.Space) *node {
 		title = fmt.Sprintf("%s (%s)", s.Name, s.Key)
 	}
 	return &node{
-		id:     s.ID,
-		loadID: s.HomepageID,
-		title:  title,
-		kind:   "space",
+		id:      s.ID,
+		loadID:  s.HomepageID,
+		title:   title,
+		kind:    "space",
+		spaceID: s.ID,
 	}
 }
 

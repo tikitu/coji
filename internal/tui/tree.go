@@ -13,6 +13,10 @@ type node struct {
 	// homepage id (the space's content root); otherwise it equals id.
 	loadID string
 
+	// spaceID is the id of the space this node lives in, needed when creating
+	// a child page. For a space node it is the space's own id.
+	spaceID string
+
 	depth    int
 	expanded bool
 	loaded   bool // children have been fetched
