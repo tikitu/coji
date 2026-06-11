@@ -150,6 +150,41 @@ Keys:
 
 Editing uses `$VISUAL`, then `$EDITOR`, falling back to `vi`.
 
+## Access policy
+
+coji can enforce a per-space access policy as a **local guardrail** — for
+example, treating some spaces as read-only so you don't accidentally edit them.
+This is *not* a security boundary (your credentials' real permissions still
+apply server-side); it just stops coji from performing operations you've opted
+out of.
+
+Create a `policy.json` in the config dir (or point `--policy` / `$COJI_POLICY`
+at one), keyed by **space key**:
+
+```json
+{
+  "default": "read-write",
+  "spaces": {
+    "ENG":     "read-write",
+    "ARCHIVE": "read-only",
+    "SECRET":  "none",
+    "DRAFTS":  ["read", "create", "edit"]
+  }
+}
+```
+
+- Access levels: `none`, `read-only`, `read-write` — or an explicit list of
+  `read` / `create` / `edit` / `delete`.
+- `default` applies to spaces not listed (defaults to `read-write`, so the file
+  only restricts what you name; set it to `read-only` for an allowlist style).
+- With **no** policy file, everything is allowed (default behavior).
+
+Checks apply to both the CLI and the TUI. Inspect the resolved policy with:
+
+```sh
+coji policy show
+```
+
 ## Design
 
 `coji` separates concerns so a future TUI can reuse the same logic:
@@ -158,7 +193,9 @@ Editing uses `$VISUAL`, then `$EDITOR`, falling back to `vi`.
 - `internal/auth` — OAuth (via `golang.org/x/oauth2`) and API-token sessions;
   produces an authorized `*http.Client` and the correct API base URL.
 - `internal/markdown` — Markdown ⇆ storage conversion (goldmark + `x/net/html`).
-- `internal/core` — the use-case layer (get/create/edit) with no UI concerns.
+- `internal/core` — the use-case layer (get/create/edit) with no UI concerns,
+  where the access policy is enforced.
+- `internal/policy` — the per-space access policy (a local guardrail).
 - `cmd/coji` — the cobra CLI, a thin shell over `internal/core`.
 
 ### Generated types

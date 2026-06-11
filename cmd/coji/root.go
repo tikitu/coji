@@ -7,6 +7,10 @@ import (
 // version is overridden at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+// policyPath is the path to the policy file, set by the --policy persistent
+// flag and read by newService.
+var policyPath string
+
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "coji",
@@ -17,10 +21,14 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
+	root.PersistentFlags().StringVar(&policyPath, "policy", "",
+		"path to a policy file (default: <config dir>/policy.json, or $COJI_POLICY)")
+
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newPageCmd())
 	root.AddCommand(newSpaceCmd())
 	root.AddCommand(newBrowseCmd())
+	root.AddCommand(newPolicyCmd())
 
 	return root
 }

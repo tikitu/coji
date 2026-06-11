@@ -1,10 +1,14 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/mgilbir/coji/internal/auth"
 	"github.com/mgilbir/coji/internal/config"
 	"github.com/mgilbir/coji/internal/confluence"
 	"github.com/mgilbir/coji/internal/core"
+	"github.com/mgilbir/coji/internal/policy"
 	"github.com/spf13/cobra"
 )
 
@@ -23,11 +27,40 @@ func newClient(cmd *cobra.Command) (*confluence.Client, *auth.Session, error) {
 	return confluence.New(sess.HTTPClient, sess.BaseURL), sess, nil
 }
 
-// newService builds the core use-case service for page commands.
+// newService builds the core use-case service, gated by the resolved policy.
 func newService(cmd *cobra.Command) (*core.Service, error) {
 	client, _, err := newClient(cmd)
 	if err != nil {
 		return nil, err
 	}
-	return core.New(client), nil
+	pol, err := loadPolicy()
+	if err != nil {
+		return nil, err
+	}
+	return core.New(client, core.WithPolicy(pol)), nil
+}
+
+// policyFilePath returns the policy file path: --policy, else $COJI_POLICY,
+// else <config dir>/policy.json.
+func policyFilePath() (string, error) {
+	if policyPath != "" {
+		return policyPath, nil
+	}
+	if env := os.Getenv("COJI_POLICY"); env != "" {
+		return env, nil
+	}
+	dir, err := config.Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "policy.json"), nil
+}
+
+// loadPolicy loads the resolved policy file (nil when none exists).
+func loadPolicy() (*policy.Policy, error) {
+	path, err := policyFilePath()
+	if err != nil {
+		return nil, err
+	}
+	return policy.Load(path)
 }

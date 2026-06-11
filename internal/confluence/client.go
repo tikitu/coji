@@ -335,6 +335,16 @@ func (c *Client) SpaceByKey(ctx context.Context, key string) (*Space, error) {
 	return &out.Results[0], nil
 }
 
+// SpaceByID fetches a space by its numeric id, primarily to recover its key
+// for policy checks when only the id is known.
+func (c *Client) SpaceByID(ctx context.Context, id string) (*Space, error) {
+	var sp Space
+	if err := c.do(ctx, http.MethodGet, "/spaces/"+url.PathEscape(id), nil, nil, &sp); err != nil {
+		return nil, err
+	}
+	return &sp, nil
+}
+
 // NextVersion returns the version number an update must declare (current + 1).
 func NextVersion(p *Page) int {
 	if p == nil || p.Version == nil {
