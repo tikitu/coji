@@ -26,20 +26,27 @@ credentials, stored locally under your OS config dir
 (`~/Library/Application Support/coji` on macOS, `~/.config/coji` on Linux) with
 `0600` permissions. Two methods are supported.
 
+> **Your site URL** is the base web address of your Confluence Cloud instance —
+> what you see in the browser when you use Confluence, e.g.
+> `https://acme.atlassian.net`. Use that base only (no `/wiki` or page path);
+> coji appends the API path itself. You can paste it with or without the
+> `https://` prefix.
+
 ### API token (simplest — no app registration)
 
-1. Create a token at
-   <https://id.atlassian.com/manage-profile/security/api-tokens>.
-2. Authenticate:
+Run `coji auth token` and follow the prompts — it asks for your email, site,
+and the token (hidden input), pointing you to where to create one:
 
-   ```sh
-   coji auth token \
-     --email you@example.com \
-     --token <api-token> \
-     --site https://your-domain.atlassian.net
-   ```
+```sh
+coji auth token
+# Atlassian account email: you@example.com
+# Confluence site URL (e.g. https://acme.atlassian.net): https://your-domain.atlassian.net
+# Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens
+# API token (input hidden): ••••••••
+```
 
-   (`--token` can also come from `COJI_API_TOKEN`, `--email` from `COJI_EMAIL`.)
+The token is never accepted on the command line. For non-interactive use, pass
+`--email`/`--site` and set `COJI_API_TOKEN` (and optionally `COJI_EMAIL`).
 
 ### OAuth 2.0 (3LO)
 

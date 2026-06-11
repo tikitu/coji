@@ -102,18 +102,22 @@ For a simpler, registration-free setup, use ` + "`coji auth token`" + ` instead.
 	return cmd
 }
 
+// tokenURLHint is where users create an API token.
+const tokenURLHint = "https://id.atlassian.com/manage-profile/security/api-tokens"
+
 func newAuthTokenCmd() *cobra.Command {
-	var email, token, site string
+	var email, site string
 
 	cmd := &cobra.Command{
 		Use:   "token",
 		Short: "Authenticate with an API token (basic auth)",
 		Long: `Authenticate using your Atlassian account email and an API token.
 
-Create a token at https://id.atlassian.com/manage-profile/security/api-tokens.
-This needs no app registration. Credentials can be passed via flags or the
-COJI_EMAIL / COJI_API_TOKEN environment variables and are stored in your config
-(0600).`,
+Create a token at ` + tokenURLHint + ` .
+This needs no app registration. With no flags, coji prompts for the values
+(the token input is hidden). For non-interactive use, supply --email and --site
+and set the token in the COJI_API_TOKEN environment variable. Credentials are
+stored in your config (0600).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -122,12 +126,37 @@ COJI_EMAIL / COJI_API_TOKEN environment variables and are stored in your config
 			if email == "" {
 				email = os.Getenv("COJI_EMAIL")
 			}
+			token := os.Getenv("COJI_API_TOKEN")
+
+			// Interactively fill anything still missing. The token is never
+			// taken from the command line; only env or a hidden prompt.
+			if email == "" || site == "" || token == "" {
+				if !stdinIsTerminal() {
+					return fmt.Errorf("missing credentials: set --email, --site, and COJI_API_TOKEN, or run interactively")
+				}
+			}
+			if email == "" {
+				if email, err = promptLine("Atlassian account email: "); err != nil {
+					return err
+				}
+			}
+			if site == "" {
+				fmt.Fprintln(os.Stderr, "Your Confluence site is the base address you see in the browser, e.g. https://acme.atlassian.net")
+				if site, err = promptLine("Confluence site URL: "); err != nil {
+					return err
+				}
+			}
 			if token == "" {
-				token = os.Getenv("COJI_API_TOKEN")
+				fmt.Fprintf(os.Stderr, "Create an API token at %s\n", tokenURLHint)
+				if token, err = promptSecret("API token (input hidden): "); err != nil {
+					return err
+				}
 			}
+
 			if email == "" || token == "" || site == "" {
-				return fmt.Errorf("--email, --token, and --site are required (token also via COJI_API_TOKEN)")
+				return fmt.Errorf("email, site, and API token are all required")
 			}
+
 			cfg.AuthMethod = config.MethodToken
 			cfg.Email = email
 			cfg.APIToken = token
@@ -144,9 +173,8 @@ COJI_EMAIL / COJI_API_TOKEN environment variables and are stored in your config
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&email, "email", "", "Atlassian account email (or COJI_EMAIL)")
-	cmd.Flags().StringVar(&token, "token", "", "API token (or COJI_API_TOKEN)")
-	cmd.Flags().StringVar(&site, "site", "", "Confluence site URL, e.g. https://acme.atlassian.net")
+	cmd.Flags().StringVar(&email, "email", "", "Atlassian account email (or COJI_EMAIL; prompted if omitted)")
+	cmd.Flags().StringVar(&site, "site", "", "Confluence site base URL (the address in your browser), e.g. https://acme.atlassian.net (prompted if omitted)")
 	return cmd
 }
 
