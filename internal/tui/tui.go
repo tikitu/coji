@@ -86,7 +86,10 @@ func Run(ctx context.Context, svc *core.Service, start string) error {
 		return err
 	}
 
-	p := tea.NewProgram(newModel(ctx, svc, roots), tea.WithAltScreen(), tea.WithContext(ctx))
+	// Detect the markdown style now, while we still own a normal terminal;
+	// doing it after bubbletea takes over yields no-color output.
+	st := detectStyle()
+	p := tea.NewProgram(newModel(ctx, svc, roots, st), tea.WithAltScreen(), tea.WithContext(ctx))
 	final, err := p.Run()
 	if err != nil {
 		return err

@@ -39,8 +39,9 @@ type model struct {
 
 	focus    focus
 	viewport viewport.Model
-	pageID   string // id whose body is in the viewport
-	pageBody string // raw markdown of the page being viewed
+	pageID   string  // id whose body is in the viewport
+	pageBody string  // raw markdown of the page being viewed
+	mdStyle  mdStyle // glamour style/profile detected before startup
 
 	width, height int
 	status        string
@@ -64,8 +65,8 @@ type model struct {
 	selectedID string
 }
 
-func newModel(ctx context.Context, svc *core.Service, roots []*node) model {
-	m := model{ctx: ctx, svc: svc, roots: roots}
+func newModel(ctx context.Context, svc *core.Service, roots []*node, st mdStyle) model {
+	m := model{ctx: ctx, svc: svc, roots: roots, mdStyle: st}
 	m.reflow()
 	return m
 }
@@ -388,7 +389,7 @@ func (m *model) refreshViewport() {
 		h = 1
 	}
 	m.viewport = viewport.New(w, h)
-	m.viewport.SetContent(renderMarkdown(m.pageBody, w))
+	m.viewport.SetContent(renderMarkdown(m.pageBody, w, m.mdStyle))
 }
 
 func (m model) current() *node {
