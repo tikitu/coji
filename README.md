@@ -9,14 +9,26 @@ Confluence *storage* format under the hood.
 
 ## Install
 
+Requires **Go 1.26+**.
+
 ```sh
 go install github.com/mgilbir/coji/cmd/coji@latest
 ```
 
-or build from source:
+This installs the `coji` binary to `$(go env GOBIN)` (or `$(go env GOPATH)/bin`,
+typically `~/go/bin`). Make sure that directory is on your `PATH`:
 
 ```sh
-go build -o coji ./cmd/coji
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+To install a specific version, replace `@latest` with a tag (e.g. `@v0.1.0`) or
+commit. To build from a clone instead:
+
+```sh
+git clone https://github.com/mgilbir/coji.git
+cd coji
+go build -o coji ./cmd/coji   # or: go install ./cmd/coji
 ```
 
 ## Authentication
