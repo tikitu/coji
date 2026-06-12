@@ -1,0 +1,11 @@
+# oapi-codegen config: generate Go types only (no client/server) for the full
+# Confluence v2 schema set, so new endpoints can be added with ready-made types.
+# Regenerate with `go generate ./internal/confluence/...`.
+package: gen
+output: types.gen.go
+generate:
+  models: true
+output-options:
+  # Keep every schema, not just those referenced by operations, since we only
+  # generate models and add operations by hand over time.
+  skip-prune: true
