@@ -125,6 +125,7 @@ func newPageGetCmd() *cobra.Command {
 
 func newPageCreateCmd() *cobra.Command {
 	var space, title, parent, format, input string
+	var private bool
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -155,11 +156,16 @@ func newPageCreateCmd() *cobra.Command {
 				ParentID: parent,
 				Format:   f,
 				Content:  content,
+				Private:  private,
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created page %s (v%d): %s\n", p.ID, p.Version, p.Title)
+			vis := ""
+			if private {
+				vis = " [private]"
+			}
+			fmt.Printf("Created page %s (v%d): %s%s\n", p.ID, p.Version, p.Title, vis)
 			return nil
 		},
 	}
@@ -168,6 +174,7 @@ func newPageCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&parent, "parent", "", "parent page ID")
 	cmd.Flags().StringVarP(&format, "format", "f", "markdown", "body format: markdown, storage, or adf")
 	cmd.Flags().StringVarP(&input, "input", "i", "-", "read body from a file (\"-\" for stdin)")
+	cmd.Flags().BoolVar(&private, "private", false, "create as a private page (only you can view/edit)")
 	return cmd
 }
 

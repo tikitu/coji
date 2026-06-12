@@ -57,6 +57,7 @@ type model struct {
 	newParent   *node
 	newSpaceID  string
 	newParentID string // parent id for the new page ("" = under homepage)
+	newPrivate  bool   // create the new page as private
 
 	// selectedID is the last node the user marked (with "y") and is printed on
 	// exit so it can feed `page create --parent`.
@@ -308,6 +309,7 @@ func (m model) beginNewPage(n *node) model {
 	ti.CharLimit = 255
 	m.titleInput = ti
 	m.newParent = n
+	m.newPrivate = false
 	m.focus = focusNewTitle
 	m.err = nil
 	m.status = ""
@@ -321,6 +323,9 @@ func (m model) updateNewTitle(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "ctrl+c":
 		m.focus = focusTree
 		m.status = "new page cancelled"
+		return m, nil
+	case "tab", "ctrl+p":
+		m.newPrivate = !m.newPrivate
 		return m, nil
 	case "enter":
 		title := strings.TrimSpace(m.titleInput.Value())
@@ -366,7 +371,7 @@ func (m model) handleEditorClosed(msg editorClosedMsg) (tea.Model, tea.Cmd) {
 	case editNew:
 		title := strings.TrimSpace(m.titleInput.Value())
 		m.status = "creating…"
-		return m, createChild(m.ctx, m.svc, m.newParent, m.newSpaceID, m.newParentID, title, content)
+		return m, createChild(m.ctx, m.svc, m.newParent, m.newSpaceID, m.newParentID, title, content, m.newPrivate)
 	}
 	m.editMode = editNone
 	return m, nil
@@ -409,8 +414,13 @@ func (m model) newTitleView() string {
 	if m.newParent != nil {
 		parent = fmt.Sprintf("%s [%s]", m.newParent.title, m.newParent.kind)
 	}
+	private := "no"
+	if m.newPrivate {
+		private = "yes"
+	}
 	return titleStyle.Render("New child page") + "\n\n" +
-		dimStyle.Render("under: "+parent) + "\n\n" +
+		dimStyle.Render("under:   "+parent) + "\n" +
+		dimStyle.Render("private: "+private+"  (tab to toggle)") + "\n\n" +
 		m.titleInput.View() + "\n\n" +
 		dimStyle.Render("enter to compose body in $EDITOR · esc to cancel")
 }

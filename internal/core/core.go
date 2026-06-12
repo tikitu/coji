@@ -141,6 +141,7 @@ type CreateInput struct {
 	ParentID string
 	Format   Format
 	Content  string // body in the given Format (markdown source, or raw storage/adf)
+	Private  bool   // create as private (only the creator can view/edit)
 }
 
 // CreatePage creates a page from the given content.
@@ -177,6 +178,7 @@ func (s *Service) CreatePage(ctx context.Context, in CreateInput) (*Page, error)
 		ParentID: in.ParentID,
 		Rep:      in.Format.rep(),
 		Value:    value,
+		Private:  in.Private,
 	})
 	if err != nil {
 		return nil, err

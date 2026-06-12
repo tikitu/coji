@@ -79,6 +79,35 @@ func TestCreatePageSendsNestedBody(t *testing.T) {
 	}
 }
 
+func TestCreatePagePrivate(t *testing.T) {
+	var gotPrivate string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPrivate = r.URL.Query().Get("private")
+		io.WriteString(w, `{"id":"1"}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	if _, err := c.CreatePage(context.Background(), CreatePageInput{
+		SpaceID: "42", Title: "secret", Rep: Storage, Value: "<p>x</p>", Private: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if gotPrivate != "true" {
+		t.Errorf("private query = %q, want \"true\"", gotPrivate)
+	}
+
+	// Without Private, the query param should be absent.
+	if _, err := c.CreatePage(context.Background(), CreatePageInput{
+		SpaceID: "42", Title: "public", Rep: Storage, Value: "<p>x</p>",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if gotPrivate != "" {
+		t.Errorf("private query = %q, want empty", gotPrivate)
+	}
+}
+
 func TestUpdatePageVersion(t *testing.T) {
 	var captured map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

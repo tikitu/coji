@@ -150,6 +150,7 @@ type CreatePageInput struct {
 	Status   string // "current" (default) or "draft"
 	Rep      Representation
 	Value    string
+	Private  bool // only the creator can view/edit (private query param)
 }
 
 // CreatePage creates a page and returns the created page.
@@ -171,8 +172,13 @@ func (c *Client) CreatePage(ctx context.Context, in CreatePageInput) (*Page, err
 		req["parentId"] = in.ParentID
 	}
 
+	var q url.Values
+	if in.Private {
+		q = url.Values{"private": {"true"}}
+	}
+
 	var p Page
-	if err := c.do(ctx, http.MethodPost, "/pages", nil, req, &p); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/pages", q, req, &p); err != nil {
 		return nil, err
 	}
 	return &p, nil

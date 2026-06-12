@@ -90,6 +90,9 @@ coji page get 123456 -o page.md          # write to a file
 coji page create --space ENG --title "Design Notes" --input notes.md
 echo "# Hi" | coji page create -s ENG -t "Quick note"
 
+# Create a private page (only you can view/edit it)
+coji page create --space ENG --title "My notes" --input notes.md --private
+
 # Edit a page (version is bumped automatically)
 coji page edit 123456 --input notes.md --message "update design"
 cat notes.md | coji page edit 123456
@@ -144,7 +147,7 @@ Keys:
 | `enter` | expand/collapse (loads children lazily) |
 | `v` | view the page (rendered markdown, scrollable) |
 | `e` | edit the page in `$EDITOR`, saved back with a version bump |
-| `n` | create a child page under the selected node (prompts for a title, then opens `$EDITOR`) |
+| `n` | create a child page under the selected node (prompts for a title — `tab` toggles private — then opens `$EDITOR`) |
 | `y` | select a node's ID (printed on exit — handy for `--parent`) |
 | `q` | quit |
 

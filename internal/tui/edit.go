@@ -124,7 +124,7 @@ func saveEdit(ctx context.Context, svc *core.Service, id, body string) tea.Cmd {
 }
 
 // createChild creates a new page under parent with the given title and body.
-func createChild(ctx context.Context, svc *core.Service, parent *node, spaceID, parentID, title, body string) tea.Cmd {
+func createChild(ctx context.Context, svc *core.Service, parent *node, spaceID, parentID, title, body string, private bool) tea.Cmd {
 	return func() tea.Msg {
 		p, err := svc.CreatePage(ctx, core.CreateInput{
 			SpaceID:  spaceID,
@@ -132,6 +132,7 @@ func createChild(ctx context.Context, svc *core.Service, parent *node, spaceID, 
 			Title:    title,
 			Format:   core.FormatMarkdown,
 			Content:  body,
+			Private:  private,
 		})
 		if err != nil {
 			return createdMsg{parent: parent, title: title, err: err}
