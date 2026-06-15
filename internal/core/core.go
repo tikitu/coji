@@ -115,6 +115,7 @@ type Page struct {
 	SpaceID  string
 	SpaceKey string // human-friendly key (e.g. ENG); empty if it couldn't be resolved
 	Version  int
+	Updated  string // ISO-8601 timestamp the current version was created (last edit)
 	Format   Format
 	WebURL   string // absolute browser URL, when the site base is known
 	Body     string
@@ -132,6 +133,9 @@ func (p *Page) Frontmatter() string {
 	}
 	if p.Version != 0 {
 		fmt.Fprintf(&b, "version: %d\n", p.Version)
+	}
+	if p.Updated != "" {
+		b.WriteString("updated: " + yamlString(p.Updated) + "\n")
 	}
 	if p.SpaceKey != "" {
 		b.WriteString("space: " + yamlString(p.SpaceKey) + "\n")
@@ -181,6 +185,7 @@ func (s *Service) GetPage(ctx context.Context, id string, format Format) (*Page,
 	}
 	if p.Version != nil {
 		out.Version = p.Version.Number
+		out.Updated = p.Version.CreatedAt
 	}
 	return out, nil
 }
