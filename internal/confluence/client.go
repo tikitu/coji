@@ -322,6 +322,27 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/spaces", q, nil, &out)
 }
 
+// FindPageByTitle returns the page with the given title in the given space, or
+// nil when none matches. Page titles are unique within a space, so at most one
+// page matches. The returned page carries _links (for building its web URL).
+func (c *Client) FindPageByTitle(ctx context.Context, spaceID, title string) (*Page, error) {
+	q := url.Values{}
+	q.Set("space-id", spaceID)
+	q.Set("title", title)
+	q.Set("limit", "1")
+
+	var out struct {
+		Results []Page `json:"results"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/pages", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Results) == 0 {
+		return nil, nil
+	}
+	return &out.Results[0], nil
+}
+
 // SpaceByKey resolves a space key (e.g. "ENG") to its space, primarily to get
 // the numeric spaceId required by CreatePage.
 func (c *Client) SpaceByKey(ctx context.Context, key string) (*Space, error) {

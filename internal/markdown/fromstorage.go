@@ -15,6 +15,11 @@ type Options struct {
 	// qualifies internal links that omit an explicit space (Confluence stores a
 	// space key only for cross-space links, so same-space links rely on this).
 	SpaceKey string
+
+	// ResolvePageURL, if set, maps an internal page link (space key + title) to
+	// an absolute, browser-clickable URL. Returning ok=false (or leaving this
+	// nil) falls back to the lossless confluence:// descriptor.
+	ResolvePageURL func(spaceKey, title string) (url string, ok bool)
 }
 
 // FromStorage converts Confluence storage-format XHTML to Markdown. It handles
@@ -327,9 +332,17 @@ func (c *conv) linkDest(n *html.Node) (string, bool) {
 			if space == "" {
 				space = c.opts.SpaceKey
 			}
+			title := attr(d, "ri:content-title")
+			// A resolvable title (with no in-page anchor to preserve) becomes a
+			// clickable URL; otherwise fall back to the lossless descriptor.
+			if anchor == "" && title != "" && c.opts.ResolvePageURL != nil {
+				if u, ok := c.opts.ResolvePageURL(space, title); ok {
+					return u, true
+				}
+			}
 			return descriptor(strings.TrimPrefix(d.Data, "ri:"), [][2]string{
 				{"space", space},
-				{"title", attr(d, "ri:content-title")},
+				{"title", title},
 				{"id", attr(d, "ri:content-id")},
 				{"anchor", anchor},
 			}), true

@@ -59,6 +59,8 @@ type Service struct {
 
 	mu       sync.Mutex
 	keyCache map[string]string // spaceID -> space key, for policy checks
+	idCache  map[string]string // space key -> spaceID, for link resolution
+	urlCache map[string]string // "spaceKey\x00title" -> page URL ("" = looked up, not found)
 }
 
 // Option configures a Service.
@@ -77,7 +79,12 @@ func WithSiteURL(url string) Option {
 
 // New returns a Service backed by the given client.
 func New(client *confluence.Client, opts ...Option) *Service {
-	s := &Service{client: client, keyCache: map[string]string{}}
+	s := &Service{
+		client:   client,
+		keyCache: map[string]string{},
+		idCache:  map[string]string{},
+		urlCache: map[string]string{},
+	}
 	for _, o := range opts {
 		o(s)
 	}
@@ -171,7 +178,20 @@ func (s *Service) GetPage(ctx context.Context, id string, format Format) (*Page,
 	if err := s.policy.Check(spaceKey, policy.OpRead); err != nil {
 		return nil, err
 	}
-	body, err := bodyOut(p.Body.Get(format.rep()), format, spaceKey)
+	// Seed the key→id cache with this page's own space so same-space links
+	// resolve without an extra lookup.
+	if spaceKey != "" && p.SpaceID != "" {
+		s.mu.Lock()
+		s.idCache[spaceKey] = p.SpaceID
+		s.mu.Unlock()
+	}
+	opts := markdown.Options{
+		SpaceKey: spaceKey,
+		ResolvePageURL: func(linkSpaceKey, title string) (string, bool) {
+			return s.resolvePageURL(ctx, linkSpaceKey, title)
+		},
+	}
+	body, err := bodyOut(p.Body.Get(format.rep()), format, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -308,16 +328,79 @@ func bodyIn(content string, format Format) (string, error) {
 	return content, nil
 }
 
-// bodyOut converts an API body to boundary content for a format. spaceKey is
-// the containing page's space, used to qualify same-space internal links.
-func bodyOut(b *confluence.Body, format Format, spaceKey string) (string, error) {
+// bodyOut converts an API body to boundary content for a format. opts qualifies
+// internal links (only used for markdown).
+func bodyOut(b *confluence.Body, format Format, opts markdown.Options) (string, error) {
 	if b == nil {
 		return "", nil
 	}
 	if format == FormatMarkdown {
-		return markdown.FromStorage(b.Value, markdown.Options{SpaceKey: spaceKey})
+		return markdown.FromStorage(b.Value, opts)
 	}
 	return b.Value, nil
+}
+
+// resolvePageURL maps an internal page link (space key + title) to its absolute
+// browser URL, returning ok=false when it can't be resolved (unknown space,
+// missing/renamed page, or no site base configured). Results — including
+// misses — are cached for the Service's lifetime.
+func (s *Service) resolvePageURL(ctx context.Context, spaceKey, title string) (string, bool) {
+	if s.siteURL == "" {
+		return "", false
+	}
+	cacheKey := spaceKey + "\x00" + title
+	s.mu.Lock()
+	if u, ok := s.urlCache[cacheKey]; ok {
+		s.mu.Unlock()
+		return u, u != ""
+	}
+	s.mu.Unlock()
+
+	url, _ := s.lookupPageURL(ctx, spaceKey, title)
+	s.mu.Lock()
+	s.urlCache[cacheKey] = url // cache misses ("") too, to avoid re-querying
+	s.mu.Unlock()
+	return url, url != ""
+}
+
+// lookupPageURL performs the uncached space-id resolution and page lookup.
+func (s *Service) lookupPageURL(ctx context.Context, spaceKey, title string) (string, error) {
+	spaceID := s.spaceID(ctx, spaceKey)
+	if spaceID == "" {
+		return "", nil
+	}
+	p, err := s.client.FindPageByTitle(ctx, spaceID, title)
+	if err != nil || p == nil {
+		return "", err
+	}
+	// The title filter isn't guaranteed exact; confirm before trusting it.
+	if !strings.EqualFold(strings.TrimSpace(p.Title), strings.TrimSpace(title)) {
+		return "", nil
+	}
+	return s.webURL(p.Links), nil
+}
+
+// spaceID resolves a space key to its numeric id (cached). Returns "" on
+// failure, leaving the link unresolved.
+func (s *Service) spaceID(ctx context.Context, key string) string {
+	if key == "" {
+		return ""
+	}
+	s.mu.Lock()
+	if id, ok := s.idCache[key]; ok {
+		s.mu.Unlock()
+		return id
+	}
+	s.mu.Unlock()
+
+	sp, err := s.client.SpaceByKey(ctx, key)
+	if err != nil || sp == nil {
+		return ""
+	}
+	s.mu.Lock()
+	s.idCache[key] = sp.ID
+	s.mu.Unlock()
+	return sp.ID
 }
 
 // pageMeta builds a Page view carrying only metadata (no body), used for
