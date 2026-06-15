@@ -115,7 +115,14 @@ func newPageGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOutput(output, p.Body)
+			body := p.Body
+			// Markdown output carries YAML frontmatter recording the page's
+			// origin (id, title, version, space, source URL); the raw storage
+			// and adf formats are passed through verbatim.
+			if f == core.FormatMarkdown {
+				body = p.Frontmatter() + body
+			}
+			return writeOutput(output, body)
 		},
 	}
 	cmd.Flags().StringVarP(&format, "format", "f", "markdown", "body format: markdown, storage, or adf")
