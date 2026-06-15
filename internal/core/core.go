@@ -167,10 +167,11 @@ func (s *Service) GetPage(ctx context.Context, id string, format Format) (*Page,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.policy.Check(s.spaceKey(ctx, p.SpaceID), policy.OpRead); err != nil {
+	spaceKey := s.spaceKey(ctx, p.SpaceID)
+	if err := s.policy.Check(spaceKey, policy.OpRead); err != nil {
 		return nil, err
 	}
-	body, err := bodyOut(p.Body.Get(format.rep()), format)
+	body, err := bodyOut(p.Body.Get(format.rep()), format, spaceKey)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,7 @@ func (s *Service) GetPage(ctx context.Context, id string, format Format) (*Page,
 		ID:       p.ID,
 		Title:    p.Title,
 		SpaceID:  p.SpaceID,
-		SpaceKey: s.spaceKey(ctx, p.SpaceID),
+		SpaceKey: spaceKey,
 		Format:   format,
 		WebURL:   s.webURL(p.Links),
 		Body:     body,
@@ -307,13 +308,14 @@ func bodyIn(content string, format Format) (string, error) {
 	return content, nil
 }
 
-// bodyOut converts an API body to boundary content for a format.
-func bodyOut(b *confluence.Body, format Format) (string, error) {
+// bodyOut converts an API body to boundary content for a format. spaceKey is
+// the containing page's space, used to qualify same-space internal links.
+func bodyOut(b *confluence.Body, format Format, spaceKey string) (string, error) {
 	if b == nil {
 		return "", nil
 	}
 	if format == FormatMarkdown {
-		return markdown.FromStorage(b.Value)
+		return markdown.FromStorage(b.Value, markdown.Options{SpaceKey: spaceKey})
 	}
 	return b.Value, nil
 }

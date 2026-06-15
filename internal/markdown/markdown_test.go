@@ -88,6 +88,60 @@ func TestFromStorage(t *testing.T) {
 	}
 }
 
+// TestFromStorageConfluenceLinks covers <ac:link> resource references, which
+// carry no resolvable URL: the target is preserved as a confluence:// descriptor
+// rather than rewritten. spaceKey qualifies same-space links (no ri:space-key).
+func TestFromStorageConfluenceLinks(t *testing.T) {
+	tests := []struct {
+		name     string
+		storage  string
+		spaceKey string
+		want     string
+	}{
+		{
+			"page same space",
+			`<p><ac:link><ri:page ri:content-title="Design Notes" /><ac:link-body>Design Notes</ac:link-body></ac:link></p>`,
+			"ENG",
+			"[Design Notes](confluence://page?space=ENG&title=Design%20Notes)",
+		},
+		{
+			"page explicit space overrides default",
+			`<p><ac:link><ri:page ri:space-key="OPS" ri:content-title="Runbook" /><ac:link-body>Runbook</ac:link-body></ac:link></p>`,
+			"ENG",
+			"[Runbook](confluence://page?space=OPS&title=Runbook)",
+		},
+		{
+			"title with special chars",
+			`<p><ac:link><ri:page ri:content-title="Q3. Review: Foo (Bar)" /><ac:link-body>Q3. Review: Foo (Bar)</ac:link-body></ac:link></p>`,
+			"DOCS",
+			"[Q3. Review: Foo (Bar)](confluence://page?space=DOCS&title=Q3.%20Review%3A%20Foo%20%28Bar%29)",
+		},
+		{
+			"attachment",
+			`<p><ac:link><ri:attachment ri:filename="report 2024.pdf" /><ac:link-body>the report</ac:link-body></ac:link></p>`,
+			"DOCS",
+			"[the report](confluence://attachment?filename=report%202024.pdf)",
+		},
+		{
+			"no body falls back to descriptor",
+			`<p><ac:link><ri:page ri:content-title="Orphan" /></ac:link></p>`,
+			"ENG",
+			"[confluence://page?space=ENG&title=Orphan](confluence://page?space=ENG&title=Orphan)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FromStorage(tt.storage, Options{SpaceKey: tt.spaceKey})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(got) != tt.want {
+				t.Errorf("FromStorage(%q):\n got: %q\nwant: %q", tt.storage, strings.TrimSpace(got), tt.want)
+			}
+		})
+	}
+}
+
 // TestRoundTrip checks that markdown survives md -> storage -> md for the
 // common constructs, which is the primary real-world path (edit a fetched page).
 func TestRoundTrip(t *testing.T) {
