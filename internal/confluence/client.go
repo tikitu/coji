@@ -61,10 +61,24 @@ type errorBody struct {
 	} `json:"errors"`
 }
 
-// do performs an API request, JSON-encoding body (if non-nil) and decoding a
-// 2xx JSON response into out (if non-nil). Non-2xx responses become *APIError.
+// do performs an API request against the v2 base URL, JSON-encoding body (if
+// non-nil) and decoding a 2xx JSON response into out (if non-nil). Non-2xx
+// responses become *APIError.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
-	u := c.baseURL + path
+	return c.doURL(ctx, method, c.baseURL+path, query, body, out)
+}
+
+// v1BaseURL derives the legacy v1 REST base from the v2 base. Both auth methods
+// produce a base ending in "api/v2" (OAuth: .../ex/confluence/{cloudId}/api/v2;
+// token: https://{site}/wiki/api/v2), and the corresponding v1 base swaps that
+// suffix for "rest/api". CQL search lives only on v1.
+func (c *Client) v1BaseURL() string {
+	return strings.TrimSuffix(c.baseURL, "api/v2") + "rest/api"
+}
+
+// doURL is do against an explicit full URL (used for the v1 search endpoint,
+// which lives off a different base than the v2 calls).
+func (c *Client) doURL(ctx context.Context, method, u string, query url.Values, body, out any) error {
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -341,6 +355,92 @@ func (c *Client) FindPageByTitle(ctx context.Context, spaceID, title string) (*P
 		return nil, nil
 	}
 	return &out.Results[0], nil
+}
+
+// SearchResult is one hit from a CQL search (v1 /search), trimmed to the fields
+// coji surfaces. URL is the site-relative path Confluence returns (e.g.
+// "/spaces/ENG/pages/123/Title"); the caller builds an absolute browser URL.
+// Excerpt may contain @@@hl@@@…@@@endhl@@@ highlight markers around matched
+// terms.
+type SearchResult struct {
+	ID       string
+	Type     string
+	Title    string
+	SpaceKey string
+	Excerpt  string
+	URL      string
+	Updated  string // lastModified timestamp
+}
+
+// searchEnvelope is the subset of the v1 /search response we decode.
+type searchEnvelope struct {
+	Results []struct {
+		Content struct {
+			ID    string `json:"id"`
+			Type  string `json:"type"`
+			Title string `json:"title"`
+			Space struct {
+				Key string `json:"key"`
+			} `json:"space"`
+		} `json:"content"`
+		Title        string `json:"title"`
+		Excerpt      string `json:"excerpt"`
+		URL          string `json:"url"`
+		LastModified string `json:"lastModified"`
+	} `json:"results"`
+	Links struct {
+		Next string `json:"next"`
+	} `json:"_links"`
+}
+
+// Search runs a CQL query against the v1 /search endpoint and returns up to
+// limit results, following the cursor pagination until limit is reached or the
+// results are exhausted. The body excerpts give callers context for triage.
+func (c *Client) Search(ctx context.Context, cql string, limit int) ([]SearchResult, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	searchURL := c.v1BaseURL() + "/search"
+
+	var out []SearchResult
+	cursor := ""
+	for len(out) < limit {
+		q := url.Values{}
+		q.Set("cql", cql)
+		q.Set("limit", fmt.Sprintf("%d", limit-len(out)))
+		q.Set("expand", "content.space,content.version,content.history.lastUpdated")
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+
+		var env searchEnvelope
+		if err := c.doURL(ctx, http.MethodGet, searchURL, q, nil, &env); err != nil {
+			return nil, err
+		}
+		for _, r := range env.Results {
+			title := r.Content.Title
+			if title == "" {
+				title = r.Title // top-level title (may carry highlight markers)
+			}
+			out = append(out, SearchResult{
+				ID:       r.Content.ID,
+				Type:     r.Content.Type,
+				Title:    title,
+				SpaceKey: r.Content.Space.Key,
+				Excerpt:  r.Excerpt,
+				URL:      r.URL,
+				Updated:  r.LastModified,
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
+		cursor = cursorFromNext(env.Links.Next)
+		if cursor == "" {
+			break
+		}
+	}
+	return out, nil
 }
 
 // SpaceByKey resolves a space key (e.g. "ENG") to its space, primarily to get

@@ -7,6 +7,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"html"
 	"strings"
 	"sync"
 
@@ -218,6 +219,129 @@ func (s *Service) webURL(links *confluence.Links) string {
 		return ""
 	}
 	return strings.TrimRight(s.siteURL, "/") + "/wiki" + links.WebUI
+}
+
+// SearchOptions tunes a search. SpaceKey restricts to one space; Limit caps
+// results (0 → a sensible default); RawCQL passes the query through as a literal
+// CQL expression instead of wrapping it in a text match.
+type SearchOptions struct {
+	SpaceKey string
+	Limit    int
+	RawCQL   bool
+}
+
+// SearchHit is the front-end-facing view of a search result: enough to triage a
+// hit (title, excerpt, space, last edit) and to act on it (ID for dedup against
+// a local archive and for fetching; WebURL for the user to open).
+type SearchHit struct {
+	ID       string
+	Title    string
+	SpaceKey string
+	Type     string
+	Excerpt  string
+	Updated  string
+	WebURL   string
+}
+
+// Search runs a CQL search and returns hits the policy permits reading. When
+// opts.RawCQL is false, query is wrapped as `type=page AND text ~ "query"`
+// (optionally scoped to opts.SpaceKey); when true, query is used verbatim.
+func (s *Service) Search(ctx context.Context, query string, opts SearchOptions) ([]SearchHit, error) {
+	cql := query
+	if !opts.RawCQL {
+		cql = buildCQL(query, opts.SpaceKey)
+	}
+	results, err := s.client.Search(ctx, cql, opts.Limit)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]SearchHit, 0, len(results))
+	for _, r := range results {
+		spaceKey := r.SpaceKey
+		id := r.ID
+		// The result URL ("/spaces/KEY/pages/ID/Slug") carries the space key and
+		// id; use it to backfill either if the API omitted them.
+		if spaceKey == "" || id == "" {
+			urlKey, urlID := parseSpaceAndID(r.URL)
+			if spaceKey == "" {
+				spaceKey = urlKey
+			}
+			if id == "" {
+				id = urlID
+			}
+		}
+		// Honor the read policy, but drop disallowed hits rather than failing the
+		// whole search (a broad query legitimately spans many spaces).
+		if !s.policy.Allow(spaceKey, policy.OpRead) {
+			continue
+		}
+		hits = append(hits, SearchHit{
+			ID:       id,
+			Title:    cleanExcerpt(r.Title),
+			SpaceKey: spaceKey,
+			Type:     r.Type,
+			Excerpt:  cleanExcerpt(r.Excerpt),
+			Updated:  r.Updated,
+			WebURL:   s.searchWebURL(r.URL),
+		})
+	}
+	return hits, nil
+}
+
+// buildCQL composes a default page-text CQL query, optionally scoped to a space.
+func buildCQL(query, spaceKey string) string {
+	cql := fmt.Sprintf(`type=page AND text ~ "%s"`, cqlEscape(query))
+	if spaceKey != "" {
+		cql += fmt.Sprintf(` AND space="%s"`, cqlEscape(spaceKey))
+	}
+	return cql
+}
+
+// cqlEscape escapes the characters that are special inside a CQL double-quoted
+// string value (backslash and double quote).
+func cqlEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+// cleanExcerpt strips Confluence's @@@hl@@@…@@@endhl@@@ search-highlight markers,
+// decodes HTML entities (excerpts and the top-level title arrive HTML-escaped,
+// e.g. &amp; and &#39;), and collapses internal whitespace (excerpts carry
+// embedded newlines).
+func cleanExcerpt(s string) string {
+	s = strings.ReplaceAll(s, "@@@hl@@@", "")
+	s = strings.ReplaceAll(s, "@@@endhl@@@", "")
+	s = html.UnescapeString(s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// searchWebURL turns a search result's site-relative URL into an absolute
+// browser URL using the configured site base. Returns "" when unavailable.
+func (s *Service) searchWebURL(relURL string) string {
+	if relURL == "" || s.siteURL == "" {
+		return ""
+	}
+	return strings.TrimRight(s.siteURL, "/") + "/wiki" + relURL
+}
+
+// parseSpaceAndID extracts the space key and page id from a Confluence content
+// URL of the form "/spaces/<KEY>/pages/<ID>/<slug>". Either may come back empty.
+func parseSpaceAndID(relURL string) (spaceKey, id string) {
+	parts := strings.Split(relURL, "/")
+	for i, p := range parts {
+		switch p {
+		case "spaces":
+			if i+1 < len(parts) {
+				spaceKey = parts[i+1]
+			}
+		case "pages":
+			if i+1 < len(parts) {
+				id = parts[i+1]
+			}
+		}
+	}
+	return spaceKey, id
 }
 
 // CreateInput describes a page to create. Exactly one of SpaceID/SpaceKey is
