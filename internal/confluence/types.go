@@ -78,14 +78,15 @@ type Links struct {
 // Page is a Confluence page as returned by reads and accepted (in part) by
 // writes.
 type Page struct {
-	ID       string   `json:"id,omitempty"`
-	Status   string   `json:"status,omitempty"`
-	Title    string   `json:"title,omitempty"`
-	SpaceID  string   `json:"spaceId,omitempty"`
-	ParentID string   `json:"parentId,omitempty"`
-	Version  *Version `json:"version,omitempty"`
-	Body     *Bodies  `json:"body,omitempty"`
-	Links    *Links   `json:"_links,omitempty"`
+	ID        string   `json:"id,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Title     string   `json:"title,omitempty"`
+	SpaceID   string   `json:"spaceId,omitempty"`
+	ParentID  string   `json:"parentId,omitempty"`
+	CreatedAt string   `json:"createdAt,omitempty"` // page creation time (v2 top-level field)
+	Version   *Version `json:"version,omitempty"`
+	Body      *Bodies  `json:"body,omitempty"`
+	Links     *Links   `json:"_links,omitempty"`
 }
 
 // Space is the subset of space fields coji needs: resolving a human-friendly
