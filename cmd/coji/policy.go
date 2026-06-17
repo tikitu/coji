@@ -36,7 +36,8 @@ func newPolicyShowCmd() *cobra.Command {
 				fmt.Println("no policy file found — all operations are allowed.")
 				return nil
 			}
-			fmt.Printf("default:     %s\n", pol.Default)
+			fmt.Printf("default:          %s\n", pol.Default)
+			fmt.Printf("personal-default: %s\n", pol.PersonalDefault)
 			if len(pol.Spaces) == 0 {
 				return nil
 			}

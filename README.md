@@ -178,12 +178,14 @@ at one), keyed by **space key**:
 
 ```json
 {
-  "default": "read-write",
+  "default":          "read-write",
+  "personal-default": "none",
   "spaces": {
     "ENG":     "read-write",
     "ARCHIVE": "read-only",
     "SECRET":  "none",
-    "DRAFTS":  ["read", "create", "edit"]
+    "DRAFTS":  ["read", "create", "edit"],
+    "~jdoe":   "read-only"
   }
 }
 ```
@@ -192,6 +194,12 @@ at one), keyed by **space key**:
   `read` / `create` / `edit` / `delete`.
 - `default` applies to spaces not listed (defaults to `read-write`, so the file
   only restricts what you name; set it to `read-only` for an allowlist style).
+- `personal-default` applies to **personal spaces** — those whose key starts
+  with `~` — that aren't listed explicitly. It defaults to `none`, so personal
+  spaces are off-limits unless you opt in (either by raising `personal-default`
+  or by naming a specific personal space, like `~jdoe` above, which overrides
+  it). This keeps coji out of individuals' personal spaces by default, even
+  when `default` is permissive.
 - With **no** policy file, everything is allowed (default behavior).
 
 Checks apply to both the CLI and the TUI. Inspect the resolved policy with:

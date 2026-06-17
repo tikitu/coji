@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -72,6 +73,59 @@ func TestPolicyLoadAndAllow(t *testing.T) {
 			t.Errorf("Allow(%q,%q) = %v, want %v", c.space, c.op, got, c.want)
 		}
 	}
+}
+
+func TestPersonalSpaceDefaults(t *testing.T) {
+	// Loaded policy that says nothing about personal spaces: they should be
+	// inaccessible (personal-default back-fills to "none"), even though the
+	// ordinary default is read-write.
+	dir := t.TempDir()
+	path := dir + "/policy.json"
+	if err := os.WriteFile(path, []byte(`{"default":"read-write"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Allow("~jdoe", OpRead) {
+		t.Error("personal space should be denied read when personal-default is omitted")
+	}
+	if !p.Allow("ENG", OpRead) {
+		t.Error("ordinary space should follow read-write default")
+	}
+
+	// An explicit personal-default, plus a per-space override that wins over it.
+	const doc = `{"default":"none","personal-default":"read-only","spaces":{"~admin":"read-write"}}`
+	q, err := loadDoc(t, dir, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		space string
+		op    Op
+		want  bool
+	}{
+		{"~jdoe", OpRead, true},  // personal-default read-only
+		{"~jdoe", OpEdit, false}, // personal-default read-only
+		{"~admin", OpEdit, true}, // explicit per-space override wins
+		{"ENG", OpRead, false},   // ordinary default none
+	}
+	for _, c := range cases {
+		if got := q.Allow(c.space, c.op); got != c.want {
+			t.Errorf("Allow(%q,%q) = %v, want %v", c.space, c.op, got, c.want)
+		}
+	}
+}
+
+// loadDoc writes doc to a temp file under dir and loads it.
+func loadDoc(t *testing.T, dir, doc string) (*Policy, error) {
+	t.Helper()
+	path := dir + "/p.json"
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return Load(path)
 }
 
 func TestNilPolicyAllowsAll(t *testing.T) {
