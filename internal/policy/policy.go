@@ -7,7 +7,8 @@
 // The policy file is JSON, keyed by space key, e.g.:
 //
 //	{
-//	  "default": "read-write",
+//	  "default":          "read-write",
+//	  "personal-default": "none",
 //	  "spaces": {
 //	    "ENG":     "read-write",
 //	    "ARCHIVE": "read-only",
@@ -17,6 +18,11 @@
 //
 // A space entry is either a preset string ("none", "read-only", "read-write")
 // or an explicit list of operations, e.g. ["read","create","edit"].
+//
+// Personal spaces (Confluence keys prefixed with "~") are treated separately:
+// when one has no explicit entry it falls back to "personal-default" rather
+// than "default". An omitted "personal-default" means "none", so personal
+// spaces are inaccessible unless explicitly opted into.
 package policy
 
 import (
@@ -103,11 +109,21 @@ func (s Set) String() string {
 	return strings.Join(ops, ",")
 }
 
+// PersonalPrefix is the leading character of a Confluence personal-space key.
+const PersonalPrefix = "~"
+
+// IsPersonal reports whether a space key names a personal space.
+func IsPersonal(spaceKey string) bool {
+	return strings.HasPrefix(spaceKey, PersonalPrefix)
+}
+
 // Policy maps space keys to allowed operation sets, with a default for spaces
-// not listed.
+// not listed. Personal spaces (see IsPersonal) fall back to PersonalDefault
+// instead of Default when they have no explicit entry.
 type Policy struct {
-	Default Set            `json:"default"`
-	Spaces  map[string]Set `json:"spaces"`
+	Default         Set            `json:"default"`
+	PersonalDefault Set            `json:"personal-default"`
+	Spaces          map[string]Set `json:"spaces"`
 }
 
 // Load reads a policy file. A missing file returns (nil, nil): with no policy,
@@ -128,6 +144,10 @@ func Load(path string) (*Policy, error) {
 	if p.Default == nil {
 		p.Default, _ = presetSet("read-write")
 	}
+	if p.PersonalDefault == nil {
+		// Personal spaces are off unless explicitly opted into.
+		p.PersonalDefault, _ = presetSet("none")
+	}
 	if p.Spaces == nil {
 		p.Spaces = map[string]Set{}
 	}
@@ -143,6 +163,9 @@ func (p *Policy) Allow(spaceKey string, op Op) bool {
 	}
 	if s, ok := p.Spaces[spaceKey]; ok {
 		return s[op]
+	}
+	if IsPersonal(spaceKey) {
+		return p.PersonalDefault[op]
 	}
 	return p.Default[op]
 }
