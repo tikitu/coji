@@ -68,16 +68,25 @@ type Version struct {
 	CreatedAt string `json:"createdAt,omitempty"`
 }
 
+// Links holds the page's hypermedia links. webui is a site-relative path (e.g.
+// "/spaces/ENG/pages/123/Title") that, prefixed with the site's "/wiki" base,
+// forms the page's browser URL.
+type Links struct {
+	WebUI string `json:"webui,omitempty"`
+}
+
 // Page is a Confluence page as returned by reads and accepted (in part) by
 // writes.
 type Page struct {
-	ID       string   `json:"id,omitempty"`
-	Status   string   `json:"status,omitempty"`
-	Title    string   `json:"title,omitempty"`
-	SpaceID  string   `json:"spaceId,omitempty"`
-	ParentID string   `json:"parentId,omitempty"`
-	Version  *Version `json:"version,omitempty"`
-	Body     *Bodies  `json:"body,omitempty"`
+	ID        string   `json:"id,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Title     string   `json:"title,omitempty"`
+	SpaceID   string   `json:"spaceId,omitempty"`
+	ParentID  string   `json:"parentId,omitempty"`
+	CreatedAt string   `json:"createdAt,omitempty"` // page creation time (v2 top-level field)
+	Version   *Version `json:"version,omitempty"`
+	Body      *Bodies  `json:"body,omitempty"`
+	Links     *Links   `json:"_links,omitempty"`
 }
 
 // Space is the subset of space fields coji needs: resolving a human-friendly

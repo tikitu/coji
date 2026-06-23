@@ -98,6 +98,9 @@ coji page get 123456
 coji page get 123456 --format storage
 coji page get 123456 -o page.md          # write to a file
 
+# Prepend YAML frontmatter with the page's metadata (markdown only)
+coji page get 123456 --frontmatter -o page.md
+
 # Create a page from a Markdown file (or stdin)
 coji page create --space ENG --title "Design Notes" --input notes.md
 echo "# Hi" | coji page create -s ENG -t "Quick note"
@@ -112,6 +115,10 @@ cat notes.md | coji page edit 123456
 
 `--format` accepts `markdown` (default), `storage`, or `adf`. With `storage` or
 `adf`, the body is passed through verbatim with no conversion.
+
+`--frontmatter` (markdown only) prepends a YAML block recording the page's
+provenance — title, id, version, created/updated timestamps, space, and the
+source URL — handy when archiving pages to files.
 
 ### Browsing & nesting
 

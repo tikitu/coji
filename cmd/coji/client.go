@@ -29,7 +29,7 @@ func newClient(cmd *cobra.Command) (*confluence.Client, *auth.Session, error) {
 
 // newService builds the core use-case service, gated by the resolved policy.
 func newService(cmd *cobra.Command) (*core.Service, error) {
-	client, _, err := newClient(cmd)
+	client, sess, err := newClient(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func newService(cmd *cobra.Command) (*core.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return core.New(client, core.WithPolicy(pol)), nil
+	return core.New(client, core.WithPolicy(pol), core.WithSiteURL(sess.SiteURL)), nil
 }
 
 // policyFilePath returns the policy file path: --policy, else $COJI_POLICY,
