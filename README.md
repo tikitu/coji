@@ -148,6 +148,25 @@ coji page create --space ENG --title "Child page" --parent 123456 --input notes.
 
 Omitting `--parent` puts the page under the space homepage.
 
+### Searching
+
+`coji search` finds pages and prints each hit with an excerpt for context:
+
+```sh
+# Match against page text (CQL: type=page AND text ~ "<query>")
+coji search "incident runbook"
+coji search "runbook" --space ENG --limit 10
+
+# Pass a raw CQL expression instead
+coji search 'label="runbook" AND type=page' --cql
+
+# Emit JSON (id, space, title, type, updated, url, excerpt) for other tooling
+coji search "runbook" --json
+```
+
+Hits you aren't permitted to read (per the access policy below) are omitted
+rather than failing the whole search.
+
 ### Interactive browser
 
 `coji browse` opens an interactive content-tree browser:

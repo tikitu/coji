@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/mgilbir/coji/internal/confluence"
+	"github.com/mgilbir/coji/internal/policy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -187,6 +188,123 @@ func TestFrontmatterIsValidYAML(t *testing.T) {
 		if fmt.Sprint(gv) != fmt.Sprint(wv) {
 			t.Errorf("frontmatter[%q] = %#v, want %#v", k, gv, wv)
 		}
+	}
+}
+
+func TestBuildCQL(t *testing.T) {
+	if got := buildCQL("nda template", ""); got != `type=page AND text ~ "nda template"` {
+		t.Errorf("buildCQL = %q", got)
+	}
+	if got := buildCQL("nda", "HR"); got != `type=page AND text ~ "nda" AND space="HR"` {
+		t.Errorf("buildCQL with space = %q", got)
+	}
+	// Quotes and backslashes in the query must be escaped, not break the CQL.
+	if got := buildCQL(`a"b\c`, ""); got != `type=page AND text ~ "a\"b\\c"` {
+		t.Errorf("buildCQL escaping = %q", got)
+	}
+}
+
+func TestCleanExcerpt(t *testing.T) {
+	// Markers stripped, HTML entities decoded, whitespace/newlines collapsed.
+	in := "the @@@hl@@@policy@@@endhl@@@ covers\nintake &amp; disposal &#39;rules&#39;"
+	want := "the policy covers intake & disposal 'rules'"
+	if got := cleanExcerpt(in); got != want {
+		t.Errorf("cleanExcerpt = %q, want %q", got, want)
+	}
+}
+
+func TestParseSpaceAndID(t *testing.T) {
+	key, id := parseSpaceAndID("/spaces/DOCS/pages/111111/Some+Title")
+	if key != "DOCS" || id != "111111" {
+		t.Errorf("parseSpaceAndID = %q,%q want DOCS,111111", key, id)
+	}
+	if k, i := parseSpaceAndID(""); k != "" || i != "" {
+		t.Errorf("parseSpaceAndID(\"\") = %q,%q want empty", k, i)
+	}
+}
+
+// newSearchSvc points a Service at a test server, using a v2-style base so the
+// client's v1 suffix-swap is exercised. siteURL lets the Service build absolute
+// WebURLs; pol (may be nil) gates results by the read policy.
+func newSearchSvc(srv *httptest.Server, siteURL string, pol *policy.Policy) *Service {
+	return New(confluence.New(srv.Client(), srv.URL+"/api/v2"),
+		WithSiteURL(siteURL), WithPolicy(pol))
+}
+
+func TestServiceSearch(t *testing.T) {
+	// One hit with a space key, one missing it (must fall back to the url path),
+	// one in a space the policy will deny.
+	const env = `{"results":[
+		{"content":{"id":"111111","type":"page","title":"Widget policy",
+			"space":{"key":"DOCS"}},
+		 "title":"Widget policy",
+		 "excerpt":"the @@@hl@@@widget@@@endhl@@@ rules\napply here",
+		 "url":"/spaces/DOCS/pages/111111/Widget+policy",
+		 "lastModified":"2025-02-03T11:22:33.000Z"},
+		{"content":{"id":"","type":"page","title":"No-space page","space":{"key":""}},
+		 "title":"No-space page","excerpt":"fallback case",
+		 "url":"/spaces/DOCS/pages/222222/No+space+page",
+		 "lastModified":"2025-03-01T00:00:00.000Z"},
+		{"content":{"id":"333333","type":"page","title":"Secret","space":{"key":"OPS"}},
+		 "title":"Secret","excerpt":"hidden",
+		 "url":"/spaces/OPS/pages/333333/Secret","lastModified":"2025-04-01T00:00:00.000Z"}
+	],"_links":{}}`
+
+	var gotCQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCQL = r.URL.Query().Get("cql")
+		io.WriteString(w, env)
+	}))
+	defer srv.Close()
+
+	// Deny reads in OPS; allow everything else.
+	pol := &policy.Policy{
+		Default: policy.Set{policy.OpRead: true},
+		Spaces:  map[string]policy.Set{"OPS": {}},
+	}
+	hits, err := newSearchSvc(srv, "https://example.atlassian.net", pol).
+		Search(context.Background(), "widget", SearchOptions{Limit: 25})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if gotCQL != `type=page AND text ~ "widget"` {
+		t.Errorf("cql = %q", gotCQL)
+	}
+	// OPS hit dropped by policy → 2 hits remain.
+	if len(hits) != 2 {
+		t.Fatalf("got %d hits, want 2 (OPS dropped by policy)", len(hits))
+	}
+
+	h0 := hits[0]
+	if h0.Excerpt != "the widget rules apply here" {
+		t.Errorf("excerpt not cleaned: %q", h0.Excerpt)
+	}
+	if h0.WebURL != "https://example.atlassian.net/wiki/spaces/DOCS/pages/111111/Widget+policy" {
+		t.Errorf("WebURL = %q", h0.WebURL)
+	}
+
+	// Second hit had empty space/id in content → recovered from the url path.
+	if hits[1].SpaceKey != "DOCS" || hits[1].ID != "222222" {
+		t.Errorf("fallback hit = %+v, want space DOCS id 222222", hits[1])
+	}
+}
+
+func TestServiceSearchRawCQL(t *testing.T) {
+	var gotCQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCQL = r.URL.Query().Get("cql")
+		io.WriteString(w, `{"results":[],"_links":{}}`)
+	}))
+	defer srv.Close()
+
+	_, err := newSearchSvc(srv, "", nil).
+		Search(context.Background(), `label="x" AND type=page`, SearchOptions{RawCQL: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotCQL != `label="x" AND type=page` {
+		t.Errorf("raw cql passed through = %q", gotCQL)
 	}
 }
 

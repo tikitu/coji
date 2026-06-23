@@ -192,6 +192,151 @@ func TestCursorFromNext(t *testing.T) {
 	}
 }
 
+// search fixtures: shape captured from a real Confluence Cloud v1 /search
+// response, with all contentful values (titles, excerpts, space keys, ids,
+// urls) replaced by invented ones. The envelope structure, field names,
+// nesting, embedded "\n" in excerpts, the "&#39;" entity in a top-level title,
+// and the cursor-bearing _links.next are preserved verbatim from the real API.
+const searchPage1 = `{
+  "results": [
+    {
+      "content": {
+        "id": "111111", "type": "page", "status": "current",
+        "title": "Widget handling policy",
+        "space": {"id": 900001, "key": "DOCS", "name": "Documentation", "type": "global"}
+      },
+      "title": "Widget handling policy",
+      "excerpt": "This page describes how widgets are handled.\nIt covers intake and disposal.",
+      "url": "/spaces/DOCS/pages/111111/Widget+handling+policy",
+      "lastModified": "2025-02-03T11:22:33.000Z",
+      "score": 42.5
+    },
+    {
+      "content": {
+        "id": "222222", "type": "page", "status": "current",
+        "title": "Gadget onboarding checklist",
+        "space": {"id": 900002, "key": "OPS", "name": "Operations", "type": "global"}
+      },
+      "title": "Gadget&#39;s onboarding checklist",
+      "excerpt": "Steps for onboarding a new gadget.",
+      "url": "/spaces/OPS/pages/222222/Gadget+onboarding+checklist",
+      "lastModified": "2025-04-10T08:00:00.000Z",
+      "score": 17.0
+    }
+  ],
+  "start": 0, "limit": 2, "size": 2, "totalSize": 3,
+  "_links": {
+    "base": "https://example.atlassian.net/wiki",
+    "next": "/rest/api/search?next=true&cursor=CURSOR2&limit=2&start=2&cql=type%3Dpage"
+  }
+}`
+
+const searchPage2 = `{
+  "results": [
+    {
+      "content": {
+        "id": "333333", "type": "page", "status": "current",
+        "title": "Sprocket maintenance guide",
+        "space": {"id": 900001, "key": "DOCS", "name": "Documentation", "type": "global"}
+      },
+      "title": "Sprocket maintenance guide",
+      "excerpt": "Routine maintenance for sprockets.",
+      "url": "/spaces/DOCS/pages/333333/Sprocket+maintenance+guide",
+      "lastModified": "2025-05-01T09:30:00.000Z",
+      "score": 9.1
+    }
+  ],
+  "start": 2, "limit": 2, "size": 1, "totalSize": 3,
+  "_links": {"base": "https://example.atlassian.net/wiki"}
+}`
+
+func TestSearchParsesAndPaginates(t *testing.T) {
+	var paths, cursors, cqls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		cursors = append(cursors, r.URL.Query().Get("cursor"))
+		cqls = append(cqls, r.URL.Query().Get("cql"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "CURSOR2" {
+			io.WriteString(w, searchPage2)
+		} else {
+			io.WriteString(w, searchPage1)
+		}
+	}))
+	defer srv.Close()
+
+	// Build the client with a v2-style base so v1BaseURL's suffix swap is exercised.
+	c := New(srv.Client(), srv.URL+"/api/v2")
+	hits, err := c.Search(context.Background(), `type=page AND text ~ "widget"`, 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hits) != 3 {
+		t.Fatalf("got %d hits, want 3", len(hits))
+	}
+	// Search must hit the v1 /search path (not the v2 base).
+	for _, p := range paths {
+		if p != "/rest/api/search" {
+			t.Errorf("request path = %q, want /rest/api/search", p)
+		}
+	}
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "CURSOR2" {
+		t.Errorf("cursors = %v, want [\"\" \"CURSOR2\"]", cursors)
+	}
+	if cqls[0] != `type=page AND text ~ "widget"` {
+		t.Errorf("cql = %q", cqls[0])
+	}
+
+	got := hits[0]
+	if got.ID != "111111" || got.SpaceKey != "DOCS" || got.Type != "page" {
+		t.Errorf("hit[0] id/space/type = %+v", got)
+	}
+	if got.Title != "Widget handling policy" {
+		t.Errorf("hit[0] title = %q", got.Title)
+	}
+	if !strings.Contains(got.Excerpt, "\n") {
+		t.Errorf("client should pass the raw excerpt through (cleaning is core's job): %q", got.Excerpt)
+	}
+	if got.URL != "/spaces/DOCS/pages/111111/Widget+handling+policy" {
+		t.Errorf("hit[0] url = %q", got.URL)
+	}
+	if got.Updated != "2025-02-03T11:22:33.000Z" {
+		t.Errorf("hit[0] updated = %q", got.Updated)
+	}
+	if hits[2].ID != "333333" {
+		t.Errorf("hit[2] id = %q, want 333333 (second page)", hits[2].ID)
+	}
+}
+
+func TestSearchHonorsLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, searchPage1) // 2 results, with a next cursor
+	}))
+	defer srv.Close()
+
+	// limit=1 must stop after the first result and not chase the next cursor.
+	hits, err := New(srv.Client(), srv.URL+"/api/v2").Search(context.Background(), "cql", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "111111" {
+		t.Errorf("hits = %+v, want exactly the first result", hits)
+	}
+}
+
+func TestV1BaseURLSuffixSwap(t *testing.T) {
+	tests := map[string]string{
+		"https://api.atlassian.com/ex/confluence/CID/api/v2": "https://api.atlassian.com/ex/confluence/CID/rest/api",
+		"https://site.atlassian.net/wiki/api/v2":             "https://site.atlassian.net/wiki/rest/api",
+	}
+	for base, want := range tests {
+		if got := New(nil, base).v1BaseURL(); got != want {
+			t.Errorf("v1BaseURL(%q) = %q, want %q", base, got, want)
+		}
+	}
+}
+
 func TestAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
