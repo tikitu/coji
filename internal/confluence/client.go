@@ -141,6 +141,27 @@ func (c *Client) GetPage(ctx context.Context, id string, format Representation) 
 	return &p, nil
 }
 
+// FindPageByTitle returns the page with the given title in the given space, or
+// nil when none matches. Page titles are unique within a space, so at most one
+// page matches. The returned page carries _links (for building its web URL).
+func (c *Client) FindPageByTitle(ctx context.Context, spaceID, title string) (*Page, error) {
+	q := url.Values{}
+	q.Set("space-id", spaceID)
+	q.Set("title", title)
+	q.Set("limit", "1")
+
+	var out struct {
+		Results []Page `json:"results"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/pages", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Results) == 0 {
+		return nil, nil
+	}
+	return &out.Results[0], nil
+}
+
 // CreatePageInput holds the fields for creating a page. Body holds exactly one
 // representation (set via Bodies).
 type CreatePageInput struct {

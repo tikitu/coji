@@ -65,6 +65,56 @@ func TestGetPageStorageRaw(t *testing.T) {
 	}
 }
 
+// TestGetPageInternalLinks verifies internal links are preserved as
+// confluence:// descriptors by default (no extra API calls), and only resolve
+// to absolute URLs when WithResolveLinks is passed — the guard that keeps the
+// network-heavy, non-round-trippable resolution off the default/edit path.
+func TestGetPageInternalLinks(t *testing.T) {
+	const pageJSON = `{"id":"7","title":"T",
+		"body":{"storage":{"representation":"storage","value":"<p>see <ac:link><ri:page ri:space-key=\"OPS\" ri:content-title=\"Runbook\" /><ac:link-body>Runbook</ac:link-body></ac:link></p>"}}}`
+
+	var titleLookups int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/pages" && r.URL.Query().Get("title") != "":
+			titleLookups++
+			io.WriteString(w, `{"results":[{"id":"55","title":"Runbook","_links":{"webui":"/spaces/OPS/pages/55/Runbook"}}]}`)
+		case r.URL.Path == "/spaces":
+			io.WriteString(w, `{"results":[{"id":"900","key":"OPS"}]}`)
+		default: // GET /pages/7
+			io.WriteString(w, pageJSON)
+		}
+	}))
+	defer srv.Close()
+
+	svc := New(confluence.New(srv.Client(), srv.URL), WithSiteURL("https://acme.atlassian.net"))
+
+	// Default: descriptor link, no resolution lookups.
+	p, err := svc.GetPage(context.Background(), "7", FormatMarkdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.Body, "confluence://page?space=OPS&title=Runbook") {
+		t.Errorf("default body should carry a descriptor link:\n%s", p.Body)
+	}
+	if titleLookups != 0 {
+		t.Errorf("default GetPage made %d title lookups, want 0", titleLookups)
+	}
+
+	// Opt-in: link resolves to an absolute URL.
+	p, err = svc.GetPage(context.Background(), "7", FormatMarkdown, WithResolveLinks())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "https://acme.atlassian.net/wiki/spaces/OPS/pages/55/Runbook"
+	if !strings.Contains(p.Body, want) {
+		t.Errorf("resolved body should contain %q:\n%s", want, p.Body)
+	}
+	if titleLookups != 1 {
+		t.Errorf("resolved GetPage made %d title lookups, want 1", titleLookups)
+	}
+}
+
 func TestCreatePageConvertsMarkdown(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

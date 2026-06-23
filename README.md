@@ -120,6 +120,13 @@ cat notes.md | coji page edit 123456
 provenance — title, id, version, created/updated timestamps, space, and the
 source URL — handy when archiving pages to files.
 
+Internal Confluence links (to pages, attachments, etc.) are preserved as
+`confluence://` descriptors, which survive a fetch → edit → save round-trip back
+to native links. `--resolve-links` (markdown only) instead rewrites internal
+page links to absolute, clickable URLs — handy for a read-only local copy, but
+it makes an extra API call per linked target and the result no longer
+round-trips, so leave it off when you intend to edit and save the page back.
+
 ### Browsing & nesting
 
 To find where to put a page, browse the content tree:

@@ -96,7 +96,7 @@ func nodeLabel(n *core.TreeNode) string {
 
 func newPageGetCmd() *cobra.Command {
 	var format, output string
-	var frontmatter bool
+	var frontmatter, resolveLinks bool
 
 	cmd := &cobra.Command{
 		Use:   "get <page-id>",
@@ -112,7 +112,11 @@ func newPageGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			p, err := svc.GetPage(cmd.Context(), args[0], f)
+			var getOpts []core.GetOption
+			if resolveLinks {
+				getOpts = append(getOpts, core.WithResolveLinks())
+			}
+			p, err := svc.GetPage(cmd.Context(), args[0], f, getOpts...)
 			if err != nil {
 				return err
 			}
@@ -130,6 +134,7 @@ func newPageGetCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&format, "format", "f", "markdown", "body format: markdown, storage, or adf")
 	cmd.Flags().StringVarP(&output, "output", "o", "-", "write body to a file (\"-\" for stdout)")
 	cmd.Flags().BoolVar(&frontmatter, "frontmatter", false, "prepend YAML frontmatter with page metadata (markdown only)")
+	cmd.Flags().BoolVar(&resolveLinks, "resolve-links", false, "resolve internal links to clickable URLs (extra API calls; markdown only)")
 	return cmd
 }
 

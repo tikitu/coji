@@ -2,27 +2,46 @@ package markdown
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
 
+// Options configure storage→markdown conversion.
+type Options struct {
+	// SpaceKey is the key of the space containing the page being converted. It
+	// qualifies internal links that omit an explicit space (Confluence stores a
+	// space key only for cross-space links, so same-space links rely on this).
+	SpaceKey string
+
+	// ResolvePageURL, if set, maps an internal page link (space key + title) to
+	// an absolute, browser-clickable URL. Returning ok=false (or leaving this
+	// nil) falls back to the lossless confluence:// descriptor.
+	ResolvePageURL func(spaceKey, title string) (url string, ok bool)
+}
+
 // FromStorage converts Confluence storage-format XHTML to Markdown. It handles
 // the standard block and inline HTML elements; elements it doesn't recognize
 // (e.g. Confluence macros) are descended into so their text content survives.
-func FromStorage(storage string) (string, error) {
+//
+// An optional Options qualifies internal Confluence links (see Options.SpaceKey).
+func FromStorage(storage string, opts ...Options) (string, error) {
 	ctx := &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body}
 	nodes, err := html.ParseFragment(strings.NewReader(storage), ctx)
 	if err != nil {
 		return "", fmt.Errorf("parsing storage: %w", err)
 	}
-	var c conv
+	c := conv{}
+	if len(opts) > 0 {
+		c.opts = opts[0]
+	}
 	out := c.blocks(nodes, "")
 	return strings.Trim(out, "\n") + "\n", nil
 }
 
-type conv struct{}
+type conv struct{ opts Options }
 
 // children returns a node's child nodes as a slice for convenient iteration.
 func children(n *html.Node) []*html.Node {
@@ -247,6 +266,8 @@ func (c *conv) inlineElement(n *html.Node) string {
 			return text
 		}
 		return "[" + text + "](" + href + ")"
+	case "ac:link":
+		return c.confluenceLink(n)
 	case "img":
 		alt := attr(n, "alt")
 		src := attr(n, "src")
@@ -255,6 +276,113 @@ func (c *conv) inlineElement(n *html.Node) string {
 		// span, unknown inline, or stray block: render children inline.
 		return c.inline(allChildren(n))
 	}
+}
+
+// confluenceLink renders a Confluence <ac:link> as a Markdown link. The link
+// target is a resource reference (ri:page, ri:attachment, …) that the storage
+// format identifies by title/filename rather than a resolvable URL, so we
+// preserve the original target verbatim as a "confluence://" descriptor rather
+// than rewrite it. External links (ri:url) carry a real URL and render as
+// ordinary Markdown links. Unknown references fall back to just their text so
+// nothing visible is lost.
+func (c *conv) confluenceLink(n *html.Node) string {
+	text := c.linkText(n)
+	dest, ok := c.linkDest(n)
+	if !ok {
+		return text
+	}
+	if text == "" {
+		text = dest
+	}
+	return "[" + text + "](" + dest + ")"
+}
+
+// linkText extracts an ac:link's display text from its link-body, if any. The
+// parser may nest the body inside the resource ref, so we search descendants.
+func (c *conv) linkText(n *html.Node) string {
+	for _, d := range descendants(n) {
+		if d.Type != html.ElementNode {
+			continue
+		}
+		switch d.Data {
+		case "ac:link-body":
+			return strings.TrimSpace(c.inline(allChildren(d)))
+		case "ac:plain-text-link-body":
+			return strings.TrimSpace(escapeText(textContent(d)))
+		}
+	}
+	return ""
+}
+
+// linkDest derives an ac:link's destination from its resource reference. It
+// returns ok=false when no recognized reference is present.
+func (c *conv) linkDest(n *html.Node) (string, bool) {
+	anchor := attr(n, "ac:anchor")
+	for _, d := range descendants(n) {
+		if d.Type != html.ElementNode || !strings.HasPrefix(d.Data, "ri:") {
+			continue
+		}
+		switch d.Data {
+		case "ri:url":
+			if v := attr(d, "ri:value"); v != "" {
+				return v, true // genuine external URL
+			}
+		case "ri:page", "ri:blog-post":
+			space := attr(d, "ri:space-key")
+			if space == "" {
+				space = c.opts.SpaceKey
+			}
+			title := attr(d, "ri:content-title")
+			// A resolvable title (with no in-page anchor to preserve) becomes a
+			// clickable URL; otherwise fall back to the lossless descriptor.
+			if anchor == "" && title != "" && c.opts.ResolvePageURL != nil {
+				if u, ok := c.opts.ResolvePageURL(space, title); ok {
+					return u, true
+				}
+			}
+			return descriptor(strings.TrimPrefix(d.Data, "ri:"), [][2]string{
+				{"space", space},
+				{"title", title},
+				{"id", attr(d, "ri:content-id")},
+				{"anchor", anchor},
+			}), true
+		case "ri:attachment":
+			return descriptor("attachment", [][2]string{
+				{"filename", attr(d, "ri:filename")},
+			}), true
+		case "ri:space":
+			return descriptor("space", [][2]string{{"space", attr(d, "ri:space-key")}}), true
+		case "ri:user":
+			return descriptor("user", [][2]string{{"account-id", attr(d, "ri:account-id")}}), true
+		}
+	}
+	if anchor != "" { // same-page anchor: no resource ref
+		return descriptor("page", [][2]string{{"space", c.opts.SpaceKey}, {"anchor", anchor}}), true
+	}
+	return "", false
+}
+
+// descriptor builds a "confluence://<scheme>?k=v&…" URI, skipping empty values
+// and percent-encoding the rest (spaces as %20 for readability).
+func descriptor(scheme string, params [][2]string) string {
+	var b strings.Builder
+	b.WriteString("confluence://")
+	b.WriteString(scheme)
+	sep := "?"
+	for _, p := range params {
+		if p[1] == "" {
+			continue
+		}
+		b.WriteString(sep + p[0] + "=" + queryEscape(p[1]))
+		sep = "&"
+	}
+	return b.String()
+}
+
+// queryEscape percent-encodes a descriptor value, using %20 for spaces rather
+// than '+' so the result reads cleanly and decodes unambiguously.
+func queryEscape(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 // --- helpers ---
