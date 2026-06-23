@@ -21,7 +21,8 @@ func TestGetPageMarkdown(t *testing.T) {
 		if got := r.URL.Query().Get("body-format"); got != "storage" {
 			t.Errorf("body-format = %q, want storage", got)
 		}
-		io.WriteString(w, `{"id":"7","title":"T","version":{"number":3},
+		io.WriteString(w, `{"id":"7","title":"T","createdAt":"2019-01-02T03:04:05.000Z",
+			"version":{"number":3,"createdAt":"2024-05-06T07:08:09.000Z"},
 			"body":{"storage":{"representation":"storage","value":"<p>hi <strong>there</strong></p>"}}}`)
 	}))
 	defer srv.Close()
@@ -32,6 +33,15 @@ func TestGetPageMarkdown(t *testing.T) {
 	}
 	if p.Version != 3 {
 		t.Errorf("version = %d, want 3", p.Version)
+	}
+	if p.Created != "2019-01-02T03:04:05.000Z" {
+		t.Errorf("created = %q, want the page creation date", p.Created)
+	}
+	if p.Updated != "2024-05-06T07:08:09.000Z" {
+		t.Errorf("updated = %q, want the current version's creation date", p.Updated)
+	}
+	if fm := p.Frontmatter(); !strings.Contains(fm, `created: "2019-01-02T03:04:05.000Z"`) {
+		t.Errorf("frontmatter missing created line:\n%s", fm)
 	}
 	if strings.TrimSpace(p.Body) != "hi **there**" {
 		t.Errorf("body = %q, want %q", p.Body, "hi **there**")

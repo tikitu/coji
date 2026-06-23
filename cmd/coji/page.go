@@ -96,6 +96,7 @@ func nodeLabel(n *core.TreeNode) string {
 
 func newPageGetCmd() *cobra.Command {
 	var format, output string
+	var frontmatter bool
 
 	cmd := &cobra.Command{
 		Use:   "get <page-id>",
@@ -115,11 +116,20 @@ func newPageGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOutput(output, p.Body)
+			body := p.Body
+			// With --frontmatter, markdown output is prefixed with a YAML block
+			// recording the page's origin (id, title, version, space, source
+			// URL). The raw storage and adf formats are always passed through
+			// verbatim.
+			if frontmatter && f == core.FormatMarkdown {
+				body = p.Frontmatter() + body
+			}
+			return writeOutput(output, body)
 		},
 	}
 	cmd.Flags().StringVarP(&format, "format", "f", "markdown", "body format: markdown, storage, or adf")
 	cmd.Flags().StringVarP(&output, "output", "o", "-", "write body to a file (\"-\" for stdout)")
+	cmd.Flags().BoolVar(&frontmatter, "frontmatter", false, "prepend YAML frontmatter with page metadata (markdown only)")
 	return cmd
 }
 

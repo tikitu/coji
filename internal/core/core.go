@@ -7,6 +7,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/mgilbir/coji/internal/confluence"
@@ -52,8 +53,9 @@ func (f Format) rep() confluence.Representation {
 // Service exposes page operations over a Confluence client, optionally gated by
 // a policy.
 type Service struct {
-	client *confluence.Client
-	policy *policy.Policy
+	client  *confluence.Client
+	policy  *policy.Policy
+	siteURL string // human-facing site base (e.g. https://acme.atlassian.net), for building page URLs
 
 	mu       sync.Mutex
 	keyCache map[string]string // spaceID -> space key, for policy checks
@@ -65,6 +67,12 @@ type Option func(*Service)
 // WithPolicy gates operations behind the given policy (nil means allow all).
 func WithPolicy(p *policy.Policy) Option {
 	return func(s *Service) { s.policy = p }
+}
+
+// WithSiteURL sets the human-facing site base used to build absolute page URLs
+// in fetched-page metadata.
+func WithSiteURL(url string) Option {
+	return func(s *Service) { s.siteURL = url }
 }
 
 // New returns a Service backed by the given client.
@@ -102,12 +110,57 @@ func (s *Service) spaceKey(ctx context.Context, spaceID string) string {
 // Page is the front-end-facing view of a page: metadata plus the body rendered
 // in the requested Format.
 type Page struct {
-	ID      string
-	Title   string
-	SpaceID string
-	Version int
-	Format  Format
-	Body    string
+	ID       string
+	Title    string
+	SpaceID  string
+	SpaceKey string // human-friendly key (e.g. ENG); empty if it couldn't be resolved
+	Version  int
+	Created  string // ISO-8601 timestamp the page was created
+	Updated  string // ISO-8601 timestamp the current version was created (last edit)
+	Format   Format
+	WebURL   string // absolute browser URL, when the site base is known
+	Body     string
+}
+
+// Frontmatter renders the page's provenance metadata as a YAML frontmatter
+// block (including the delimiters and a trailing blank line), suitable for
+// prepending to a Markdown body. Fields that are empty are omitted.
+func (p *Page) Frontmatter() string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("title: " + yamlString(p.Title) + "\n")
+	if p.ID != "" {
+		b.WriteString("id: " + yamlString(p.ID) + "\n")
+	}
+	if p.Version != 0 {
+		fmt.Fprintf(&b, "version: %d\n", p.Version)
+	}
+	if p.Created != "" {
+		b.WriteString("created: " + yamlString(p.Created) + "\n")
+	}
+	if p.Updated != "" {
+		b.WriteString("updated: " + yamlString(p.Updated) + "\n")
+	}
+	if p.SpaceKey != "" {
+		b.WriteString("space: " + yamlString(p.SpaceKey) + "\n")
+	}
+	if p.SpaceID != "" {
+		b.WriteString("spaceId: " + yamlString(p.SpaceID) + "\n")
+	}
+	if p.WebURL != "" {
+		b.WriteString("source: " + yamlString(p.WebURL) + "\n")
+	}
+	b.WriteString("---\n\n")
+	return b.String()
+}
+
+// yamlString renders s as a double-quoted YAML scalar, escaping backslashes and
+// double quotes. Double-quoting keeps values safe regardless of special
+// characters (colons, leading symbols) common in titles and URLs.
+func yamlString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
 }
 
 // GetPage fetches a page and returns its body in the requested format. For
@@ -118,18 +171,38 @@ func (s *Service) GetPage(ctx context.Context, id string, format Format) (*Page,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.policy.Check(s.spaceKey(ctx, p.SpaceID), policy.OpRead); err != nil {
+	spaceKey := s.spaceKey(ctx, p.SpaceID)
+	if err := s.policy.Check(spaceKey, policy.OpRead); err != nil {
 		return nil, err
 	}
 	body, err := bodyOut(p.Body.Get(format.rep()), format)
 	if err != nil {
 		return nil, err
 	}
-	out := &Page{ID: p.ID, Title: p.Title, SpaceID: p.SpaceID, Format: format, Body: body}
+	out := &Page{
+		ID:       p.ID,
+		Title:    p.Title,
+		SpaceID:  p.SpaceID,
+		SpaceKey: spaceKey,
+		Created:  p.CreatedAt,
+		Format:   format,
+		WebURL:   s.webURL(p.Links),
+		Body:     body,
+	}
 	if p.Version != nil {
 		out.Version = p.Version.Number
+		out.Updated = p.Version.CreatedAt
 	}
 	return out, nil
+}
+
+// webURL builds an absolute browser URL from a page's site-relative webui link
+// and the configured site base. Returns "" when either is unavailable.
+func (s *Service) webURL(links *confluence.Links) string {
+	if links == nil || links.WebUI == "" || s.siteURL == "" {
+		return ""
+	}
+	return strings.TrimRight(s.siteURL, "/") + "/wiki" + links.WebUI
 }
 
 // CreateInput describes a page to create. Exactly one of SpaceID/SpaceKey is
