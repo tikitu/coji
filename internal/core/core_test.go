@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -271,22 +272,41 @@ func TestServiceSearch(t *testing.T) {
 	if gotCQL != `type=page AND text ~ "widget"` {
 		t.Errorf("cql = %q", gotCQL)
 	}
-	// OPS hit dropped by policy → 2 hits remain.
-	if len(hits) != 2 {
-		t.Fatalf("got %d hits, want 2 (OPS dropped by policy)", len(hits))
+
+	// Exactly the two readable docs come back, fully populated and in order. The
+	// OPS doc is filtered out by the read policy; the second doc's content
+	// carried no space/id, so both are recovered from its result URL, and its
+	// excerpt is cleaned (markers/entities stripped, whitespace collapsed).
+	want := []SearchHit{
+		{
+			ID:       "111111",
+			Title:    "Widget policy",
+			SpaceKey: "DOCS",
+			Type:     "page",
+			Excerpt:  "the widget rules apply here",
+			Updated:  "2025-02-03T11:22:33.000Z",
+			WebURL:   "https://example.atlassian.net/wiki/spaces/DOCS/pages/111111/Widget+policy",
+		},
+		{
+			ID:       "222222",
+			Title:    "No-space page",
+			SpaceKey: "DOCS",
+			Type:     "page",
+			Excerpt:  "fallback case",
+			Updated:  "2025-03-01T00:00:00.000Z",
+			WebURL:   "https://example.atlassian.net/wiki/spaces/DOCS/pages/222222/No+space+page",
+		},
+	}
+	if !reflect.DeepEqual(hits, want) {
+		t.Fatalf("search hits mismatch:\n got: %+v\nwant: %+v", hits, want)
 	}
 
-	h0 := hits[0]
-	if h0.Excerpt != "the widget rules apply here" {
-		t.Errorf("excerpt not cleaned: %q", h0.Excerpt)
-	}
-	if h0.WebURL != "https://example.atlassian.net/wiki/spaces/DOCS/pages/111111/Widget+policy" {
-		t.Errorf("WebURL = %q", h0.WebURL)
-	}
-
-	// Second hit had empty space/id in content → recovered from the url path.
-	if hits[1].SpaceKey != "DOCS" || hits[1].ID != "222222" {
-		t.Errorf("fallback hit = %+v, want space DOCS id 222222", hits[1])
+	// Be explicit that the policy-denied OPS document is gone, not just that the
+	// count happens to line up.
+	for _, h := range hits {
+		if h.SpaceKey == "OPS" || h.ID == "333333" || h.Title == "Secret" {
+			t.Errorf("policy-denied OPS doc leaked into results: %+v", h)
+		}
 	}
 }
 
